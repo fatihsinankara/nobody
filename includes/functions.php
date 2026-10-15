@@ -11,7 +11,41 @@ if (!defined('APP_INIT')) {
  * XSS Koruması için güvenli HTML çıktısı
  */
 function e(?string $str): string {
-    return htmlspecialchars((string)$str, ENT_QUOTES, 'UTF-8');
+    return htmlspecialchars((string)$str, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+}
+
+/**
+ * URL Güvenliği (XSS, javascript:, data: enjeksiyonu engelleme)
+ * Yalnızca geçerli http:// ve https:// protokollerine izin verir.
+ */
+function safe_url(?string $url): string {
+    if (empty($url)) {
+        return '';
+    }
+    $url = trim($url);
+    // Görünmeyen kontrol karakterlerini temizle
+    $url = preg_replace('/[\x00-\x1F\x7F]/u', '', $url);
+    
+    // Protokol belirtilmemişse https:// varsay
+    if (!preg_match('#^[a-z][a-z0-9+.-]*://#i', $url)) {
+        $url = 'https://' . $url;
+    }
+    
+    $parts = parse_url($url);
+    if (!$parts || empty($parts['scheme']) || empty($parts['host'])) {
+        return '';
+    }
+    
+    $scheme = strtolower($parts['scheme']);
+    if ($scheme !== 'http' && $scheme !== 'https') {
+        return '';
+    }
+    
+    if (preg_match('/^(javascript|data|vbscript|file):/i', $url)) {
+        return '';
+    }
+    
+    return filter_var($url, FILTER_VALIDATE_URL) ? $url : '';
 }
 
 /**
@@ -163,7 +197,23 @@ function increment_hit_counter(): array {
  * Yönetici oturumu kontrolü
  */
 function is_admin_logged_in(): bool {
-    return isset($_SESSION['admin_user_id']) && !empty($_SESSION['admin_user_id']);
+    if (empty($_SESSION['admin_user_id'])) {
+        return false;
+    }
+
+    // 2 saatlik hareketsizlik zaman aşımı (Inactivity timeout)
+    if (isset($_SESSION['admin_last_activity']) && (time() - (int)$_SESSION['admin_last_activity'] > 7200)) {
+        unset($_SESSION['admin_user_id'], $_SESSION['admin_username'], $_SESSION['admin_display_name'], $_SESSION['admin_ua'], $_SESSION['admin_last_activity']);
+        return false;
+    }
+    $_SESSION['admin_last_activity'] = time();
+
+    // Oturum çalma (Session Hijacking) koruması: Tarayıcı imzası doğrulaması
+    if (isset($_SESSION['admin_ua']) && $_SESSION['admin_ua'] !== ($_SERVER['HTTP_USER_AGENT'] ?? '')) {
+        return false;
+    }
+
+    return true;
 }
 
 /**
@@ -233,7 +283,7 @@ function get_recent_posts(int $limit = 5): array {
  * Yorum & Ziyaretçi defteri için basit matematik doğrulama (Anti-Spam)
  */
 function get_math_captcha(): array {
-    if (!isset($_SESSION['math_captcha'])) {
+    if (!isset($_SESSION['math_captcha']) || !is_array($_SESSION['math_captcha'])) {
         $n1 = rand(2, 9);
         $n2 = rand(1, 8);
         $_SESSION['math_captcha'] = [
@@ -244,10 +294,18 @@ function get_math_captcha(): array {
     return $_SESSION['math_captcha'];
 }
 
-function verify_and_refresh_captcha(int $userAnswer): bool {
-    $correct = isset($_SESSION['math_captcha']) && ((int)$_SESSION['math_captcha']['answer'] === $userAnswer);
+function verify_and_refresh_captcha(mixed $userAnswer): bool {
+    if (!isset($_SESSION['math_captcha']['answer'])) {
+        return false;
+    }
+    $correctAnswer = (int)$_SESSION['math_captcha']['answer'];
     unset($_SESSION['math_captcha']); // Tek kullanımlık
-    return $correct;
+
+    if ($userAnswer === '' || $userAnswer === null || !is_numeric($userAnswer)) {
+        return false;
+    }
+
+    return (int)$userAnswer === $correctAnswer;
 }
 
 /**
@@ -267,6 +325,20 @@ function render_content(string $content): string {
     // `kod` veya [code]kod[/code]
     $safe = preg_replace('/`([^`]+)`/', '<code>$1</code>', $safe);
     $safe = preg_replace('/\[code\](.*?)\[\/code\]/is', '<pre><code>$1</code></pre>', $safe);
+
+    // Güvenli BBCode Bağlantı: [url=https://...]Bağlantı[/url] veya [url]https://...[/url]
+    $safe = preg_replace_callback('/\[url=(.*?)\](.*?)\[\/url\]/i', function($matches) {
+        $url = safe_url($matches[1]);
+        $text = $matches[2];
+        if (empty($url)) return $text;
+        return '<a href="' . e($url) . '" target="_blank" rel="nofollow noopener noreferrer">' . $text . '</a>';
+    }, $safe);
+
+    $safe = preg_replace_callback('/\[url\](.*?)\[\/url\]/i', function($matches) {
+        $url = safe_url($matches[1]);
+        if (empty($url)) return $matches[1];
+        return '<a href="' . e($url) . '" target="_blank" rel="nofollow noopener noreferrer">' . e($url) . '</a>';
+    }, $safe);
 
     // Paragraf ve satır sonları
     return nl2br($safe);
@@ -297,28 +369,83 @@ function csrf_verify(?string $token): bool {
 }
 
 /**
- * Brute-force ve spam engelleme için oturum bazlı hız sınırlayıcı (Rate Limiter)
+ * Brute-force ve spam engelleme için ÇİFT KATMANLI (Oturum + IP Hash Veritabanı) Hız Sınırlayıcı
+ * Ziyaretçi çerezlerini silse dahi IP üzerinden bloklama garantilenir.
  */
 function check_rate_limit(string $action, int $maxAttempts = 5, int $decaySeconds = 600): bool {
-    $key = 'rate_limit_' . $action;
     $now = time();
+
+    // 1. Oturum (Session) Kontrolü
+    $key = 'rate_limit_' . $action;
     if (!isset($_SESSION[$key]) || !is_array($_SESSION[$key])) {
         $_SESSION[$key] = [];
     }
     $_SESSION[$key] = array_filter($_SESSION[$key], fn($timestamp) => ($now - $timestamp) < $decaySeconds);
-    return count($_SESSION[$key]) < $maxAttempts;
+    if (count($_SESSION[$key]) >= $maxAttempts) {
+        return false;
+    }
+
+    // 2. IP Hash Veritabanı Kontrolü (Çerezsiz bot veya saldırganlara karşı)
+    try {
+        $pdo = get_db_connection();
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        $ip_hash = hash('sha256', $ip);
+        $since = $now - $decaySeconds;
+
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM rate_limits WHERE ip_hash = ? AND action_key = ? AND created_at > ?");
+        $stmt->execute([$ip_hash, $action, $since]);
+        $ip_hits = (int)$stmt->fetchColumn();
+
+        if ($ip_hits >= $maxAttempts) {
+            return false;
+        }
+    } catch (Throwable $e) {
+        // Veritabanı tablosu hazır değilse oturum kontrolüyle devam et
+    }
+
+    return true;
 }
 
 function record_rate_limit_hit(string $action): void {
+    $now = time();
+
+    // 1. Oturuma kaydet
     $key = 'rate_limit_' . $action;
     if (!isset($_SESSION[$key]) || !is_array($_SESSION[$key])) {
         $_SESSION[$key] = [];
     }
-    $_SESSION[$key][] = time();
+    $_SESSION[$key][] = $now;
+
+    // 2. Veritabanına kaydet
+    try {
+        $pdo = get_db_connection();
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        $ip_hash = hash('sha256', $ip);
+
+        $stmt = $pdo->prepare("INSERT INTO rate_limits (ip_hash, action_key, created_at) VALUES (?, ?, ?)");
+        $stmt->execute([$ip_hash, $action, $now]);
+
+        // Olasılıksal eski kayıt temizliği (Her 25 istekte 1 kez 1 saatten eski kayıtları temizler)
+        if (mt_rand(1, 25) === 1) {
+            $cleanup = $now - 3600;
+            $pdo->prepare("DELETE FROM rate_limits WHERE created_at < ?")->execute([$cleanup]);
+        }
+    } catch (Throwable $e) {
+        // Sessizce devam et
+    }
 }
 
 function reset_rate_limit(string $action): void {
     unset($_SESSION['rate_limit_' . $action]);
+    try {
+        $pdo = get_db_connection();
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        $ip_hash = hash('sha256', $ip);
+        $stmt = $pdo->prepare("DELETE FROM rate_limits WHERE ip_hash = ? AND action_key = ?");
+        $stmt->execute([$ip_hash, $action]);
+    } catch (Throwable $e) {
+        // Sessizce devam et
+    }
 }
 
 /**
