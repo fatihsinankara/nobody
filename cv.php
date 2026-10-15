@@ -57,7 +57,7 @@ include __DIR__ . '/includes/header.php';
 
             <!-- Eylemler (Yazdır & Düzenle) -->
             <div class="no-print" style="display: flex; gap: 8px;">
-                <button type="button" onclick="window.print()" class="btn btn-sm" title="Yazdır veya PDF Olarak Kaydet">
+                <button type="button" data-action="print" class="btn btn-sm" title="Yazdır veya PDF Olarak Kaydet">
                     [🖨 Yazdır / PDF]
                 </button>
                 <?php if ($is_admin): ?>

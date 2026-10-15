@@ -1,10 +1,21 @@
 # Apache Güvenlik ve URL Rewrite Yapılandırması
 Options -Indexes -MultiViews
 
+# Nokta ile başlayan gizli dosya ve dizinleri (.git, .env, .cpanel.yml vb.) tamamen engelle
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule (^|/)\. - [F,L]
+</IfModule>
+
 # Hassas dosya ve uzantılara doğrudan erişimi engelle
-<FilesMatch "(^#.*#|\.(bak|config|dist|fla|inc|ini|log|psd|sh|sql|sw[op]|env|lock|git|md)|installed\.lock|database\.php)$">
-    Order allow,deny
-    Deny from all
+<FilesMatch "(^#.*#|\.(bak|config|dist|fla|inc|ini|log|psd|sh|sql|sw[op]|env|lock|git|md|yml|yaml)|installed\.lock|database\.php)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
 </FilesMatch>
 
 # config ve includes dizinlerini tamamen web erişimine kapat

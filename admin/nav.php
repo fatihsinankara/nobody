@@ -19,5 +19,5 @@ $current_page = basename($_SERVER['SCRIPT_NAME'] ?? '');
     <a href="/admin/guestbook.php" style="<?= $current_page === 'guestbook.php' ? 'font-weight:bold; color:#a00;' : '' ?>">[Ziyaretçi Defteri <?= $unapproved_gb > 0 ? "($unapproved_gb)" : '' ?>]</a>
     <a href="/admin/settings.php" style="<?= $current_page === 'settings.php' ? 'font-weight:bold; color:#a00;' : '' ?>">[Site Ayarları]</a>
     <a href="/" target="_blank">[Siteyi Gör ↗]</a>
-    <a href="/admin/logout.php" style="color: #990000; margin-left: auto;">[Çıkış Yap]</a>
+    <a href="/admin/logout.php?token=<?= csrf_token() ?>" style="color: #990000; margin-left: auto;">[Çıkış Yap]</a>
 </div>

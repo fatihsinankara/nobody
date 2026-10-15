@@ -67,10 +67,8 @@ Tarayıcınızda açın:
 
 ## 🔐 Varsayılan Giriş Bilgileri
 
-* **Kullanıcı Adı:** `nobody`
-* **Şifre:** `nobody`
-
-*(Giriş yaptıktan sonra **Site Ayarları** sekmesinden şifrenizi istediğiniz zaman değiştirebilirsiniz).*
+* **Kullanıcı Adı & Şifre:** Kurulum sihirbazı (`/install.php`) esnasında belirlediğiniz yönetici kimlik bilgileri geçerlidir.
+* *(Giriş yaptıktan sonra **Site Ayarları** sekmesinden şifrenizi istediğiniz zaman değiştirebilirsiniz).*
 
 ---
 
@@ -78,8 +76,8 @@ Tarayıcınızda açın:
 
 1. Depoyu klonlayın:
    ```bash
-   git clone https://github.com/kullaniciadi/proje-adi.git
-   cd proje-adi
+   git clone https://github.com/fatihsinankara/nobody.git
+   cd nobody
    ```
 
 2. PHP yerleşik sunucusunu çalıştırın:
@@ -127,13 +125,15 @@ Proje kök dizininde hazır bir [`.cpanel.yml`](.cpanel.yml) dosyası bulunmakta
 │   ├── login.php              # Rate-limit korumalı yönetici girişi
 │   └── nav.php                # Yönetim gezinme çubuğu
 ├── assets/
-│   └── style.css              # Saf 2000'ler retro-modern ve responsive CSS stili
+│   ├── style.css              # Saf 2000'ler retro-modern ve responsive CSS stili
+│   └── app.js                 # Minimal saf JS etkileşimleri (onay pencereleri ve yazdırma)
 ├── config/
 │   ├── database.example.php   # Örnek veritabanı şablonu (GitHub için)
 │   ├── database.php           # Yerel MySQL PDO bağlantısı (git-ignored)
 │   ├── init.php               # Oturum, tekil sayaç ve genel başlatıcı
 │   └── installed.lock         # Kurulum kilit dosyası (git-ignored)
 ├── includes/
+│   ├── schema.php             # Tekil veritabanı şeması ve sürüm geçişleri (migrations)
 │   ├── functions.php          # CSRF, rate limit, slug, sayaç ve güvenlik fonksiyonları
 │   ├── header.php             # Nostaljik başlık ve dinamik menü şablonu
 │   ├── sidebar.php            # Arama, kategoriler, son yazılar, blogroll

@@ -116,7 +116,7 @@ include __DIR__ . '/nav.php';
                         <a href="/admin/guestbook.php?toggle_approve=<?= $item['id'] ?>&token=<?= csrf_token() ?>" class="btn btn-sm">
                             <?= $item['is_approved'] ? 'Gizle' : 'Onayla' ?>
                         </a>
-                        <a href="/admin/guestbook.php?delete=<?= $item['id'] ?>&token=<?= csrf_token() ?>" class="btn btn-sm btn-danger" onclick="return confirm('Bu mesajı silmek istediğinizden emin misiniz?');">Sil</a>
+                        <a href="/admin/guestbook.php?delete=<?= $item['id'] ?>&token=<?= csrf_token() ?>" class="btn btn-sm btn-danger" data-confirm="Bu mesajı silmek istediğinizden emin misiniz?">Sil</a>
                     </td>
                 </tr>
             <?php endforeach; ?>

@@ -16,24 +16,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     if (!csrf_verify($_POST['csrf_token'] ?? '')) {
         $error = 'Güvenlik doğrulaması (CSRF) başarısız oldu.';
     } else {
-        $mood = trim($_POST['current_mood'] ?? '');
-        $playing = trim($_POST['now_playing'] ?? '');
+        $mood = input('current_mood', 100);
+        $playing = input('now_playing', 150);
         set_setting('current_mood', $mood);
         set_setting('now_playing', $playing);
         $msg = 'Durum ve Winamp bilgisi başarıyla güncellendi!';
     }
 }
 
-// Yazı Silme İşlemi (CSRF korumalı)
+// Yazı Silme İşlemi (CSRF korumalı ve Transaction ile atomik)
 if (isset($_GET['delete'])) {
     if (!csrf_verify($_GET['token'] ?? '')) {
         $error = 'Güvenlik hatası: Silme isteği doğrulanamadı.';
     } else {
         $del_id = (int)$_GET['delete'];
-        $stmt = $pdo->prepare("DELETE FROM posts WHERE id = ?");
-        $stmt->execute([$del_id]);
-        $pdo->prepare("DELETE FROM comments WHERE post_id = ?")->execute([$del_id]);
-        $msg = 'Yazı ve ilgili yorumları başarıyla silindi.';
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare("DELETE FROM comments WHERE post_id = ?")->execute([$del_id]);
+            $pdo->prepare("DELETE FROM posts WHERE id = ?")->execute([$del_id]);
+            $pdo->commit();
+            $msg = 'Yazı ve ilgili yorumları başarıyla silindi.';
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            $error = 'Yazı silinirken bir hata oluştu.';
+        }
     }
 }
 
@@ -164,7 +170,7 @@ include __DIR__ . '/nav.php';
                     <td style="font-family: monospace; font-size: 11px;"><?= date('d.m.Y H:i', strtotime($p['created_at'])) ?></td>
                     <td>
                         <a href="/admin/post_edit.php?id=<?= $p['id'] ?>" class="btn btn-sm">Düzenle</a>
-                        <a href="/admin/index.php?delete=<?= $p['id'] ?>&token=<?= csrf_token() ?>" class="btn btn-sm btn-danger" onclick="return confirm('Bu yazıyı silmek istediğinizden emin misiniz?');">Sil</a>
+                        <a href="/admin/index.php?delete=<?= $p['id'] ?>&token=<?= csrf_token() ?>" class="btn btn-sm btn-danger" data-confirm="Bu yazıyı silmek istediğinizden emin misiniz?">Sil</a>
                     </td>
                 </tr>
             <?php endforeach; ?>

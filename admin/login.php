@@ -81,20 +81,16 @@ include __DIR__ . '/../includes/header.php';
 
         <div class="form-group">
             <label for="username">Kullanıcı Adı:</label>
-            <input type="text" id="username" name="username" required autofocus value="<?= isset($_POST['username']) ? e($_POST['username']) : 'nobody' ?>">
+            <input type="text" id="username" name="username" required autofocus value="<?= e(input('username', 50)) ?>" autocomplete="username">
         </div>
 
         <div class="form-group">
             <label for="password">Şifre:</label>
-            <input type="password" id="password" name="password" required value="nobody">
+            <input type="password" id="password" name="password" required autocomplete="current-password">
         </div>
 
         <div style="margin-top: 15px;">
             <button type="submit" class="btn" style="width: 100%;">Giriş Yap &raquo;</button>
-        </div>
-
-        <div style="margin-top: 15px; font-family: 'Courier New', monospace; font-size: 11px; color: #666; border-top: 1px dotted #ccc; padding-top: 8px;">
-            Varsayılan: <strong>nobody</strong> / <strong>nobody</strong>
         </div>
     </form>
 </div>

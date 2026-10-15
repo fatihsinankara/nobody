@@ -16,10 +16,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_about'])) {
         $error = 'Güvenlik doğrulaması (CSRF) başarısız oldu. Lütfen sayfayı yenileyin.';
     } else {
         $about_enabled = isset($_POST['about_enabled']) ? '1' : '0';
-        $webmaster_name = trim($_POST['webmaster_name'] ?? '');
-        $about_text = trim($_POST['about_text'] ?? '');
-        $about_interests = trim($_POST['about_interests'] ?? '');
-        $blogroll_raw = trim($_POST['blogroll_raw'] ?? '');
+        $webmaster_name = input('webmaster_name', 100) ?: 'nobody';
+        $about_text = input('about_text');
+        $about_interests = input('about_interests');
+        $blogroll_raw = input('blogroll_raw');
 
         // Blogroll ayrıştırma (Başlık | URL)
         $links = [];
@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_about'])) {
             $parts = explode('|', $line, 2);
             if (count($parts) === 2) {
                 $t = trim($parts[0]);
-                $u = trim($parts[1]);
+                $u = safe_url(trim($parts[1]));
                 if ($t !== '' && $u !== '') {
                     $links[] = ['title' => $t, 'url' => $u];
                 }

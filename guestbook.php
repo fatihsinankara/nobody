@@ -32,24 +32,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_guestbook'])) 
     } elseif (!check_rate_limit('guestbook', 3, 300)) {
         $error = 'Kısa sürede çok fazla mesaj gönderdiniz. Lütfen birkaç dakika bekleyin.';
     } else {
-        $author_name = mb_substr(trim($_POST['author_name'] ?? ''), 0, 80);
-        $author_city = mb_substr(trim($_POST['author_city'] ?? ''), 0, 60);
-        $author_url = safe_url(trim($_POST['author_url'] ?? ''));
-        $message = mb_substr(trim($_POST['message'] ?? ''), 0, 3000);
+        $author_name = input('author_name', 80);
+        $author_city = input('author_city', 60);
+        $author_url = safe_url(input('author_url', 200));
+        $message = input('message', 3000);
         $captcha_input = $_POST['captcha_answer'] ?? '';
 
-        if (empty($author_name)) {
+        if ($author_name === '') {
             $error = 'Lütfen adınızı veya takma adınızı belirtin.';
-        } elseif (empty($message)) {
+        } elseif ($message === '') {
             $error = 'Lütfen bir hatıra / selam mesajı yazın.';
         } elseif (!verify_and_refresh_captcha($captcha_input)) {
+            record_rate_limit_hit('guestbook');
             $error = 'Güvenlik sorusu hatalı girildi. Lütfen tekrar deneyin.';
         } else {
             record_rate_limit_hit('guestbook');
 
-            $ins = $pdo->prepare("INSERT INTO guestbook (author_name, author_city, author_url, message, created_at, is_approved) VALUES (?, ?, ?, ?, NOW(), 1)");
-            $ins->execute([$author_name, $author_city, $author_url, $message]);
-            $success = 'Ziyaretçi defterine yazdığınız not kaydedildi. Teşekkürler!';
+            $requires_mod = (get_setting('comment_moderation', '1') === '1') && !$is_admin;
+            $is_approved = $requires_mod ? 0 : 1;
+
+            $ins = $pdo->prepare("INSERT INTO guestbook (author_name, author_city, author_url, message, created_at, is_approved) VALUES (?, ?, ?, ?, NOW(), ?)");
+            $ins->execute([$author_name, $author_city, $author_url, $message, $is_approved]);
+            $success = $requires_mod
+                ? 'Ziyaretçi defterine yazdığınız not iletildi. Yönetici onayının ardından defterde yerini alacaktır. Teşekkürler!'
+                : 'Ziyaretçi defterine yazdığınız not kaydedildi. Teşekkürler!';
         }
     }
 }
@@ -57,9 +63,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_guestbook'])) 
 // Yeni captcha sorusu
 $captcha = get_math_captcha();
 
-// Sayfalama
+// Sayfalama (güvenli sınırlandırma)
 $per_page = 10;
-$page = max(1, (int)($_GET['p'] ?? 1));
+$page = max(1, min(100000, (int)($_GET['p'] ?? 1)));
 $offset = ($page - 1) * $per_page;
 
 $count_stmt = $pdo->query("SELECT COUNT(*) FROM guestbook WHERE is_approved = 1");
@@ -115,23 +121,23 @@ include __DIR__ . '/includes/header.php';
         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
             <div class="form-group" style="flex: 1; min-width: 140px;">
                 <label for="author_name">İsminiz: *</label>
-                <input type="text" id="author_name" name="author_name" maxlength="80" required value="<?= isset($_POST['author_name']) ? e($_POST['author_name']) : '' ?>">
+                <input type="text" id="author_name" name="author_name" maxlength="80" required value="<?= e(input('author_name', 80)) ?>">
             </div>
 
             <div class="form-group" style="flex: 1; min-width: 140px;">
                 <label for="author_city">Şehir / Ülke:</label>
-                <input type="text" id="author_city" name="author_city" maxlength="60" placeholder="örn. İstanbul veya Berlin" value="<?= isset($_POST['author_city']) ? e($_POST['author_city']) : '' ?>">
+                <input type="text" id="author_city" name="author_city" maxlength="60" placeholder="örn. İstanbul veya Berlin" value="<?= e(input('author_city', 60)) ?>">
             </div>
 
             <div class="form-group" style="flex: 1; min-width: 140px;">
                 <label for="author_url">Web Siteniz (Varsa):</label>
-                <input type="url" id="author_url" name="author_url" placeholder="https://..." value="<?= isset($_POST['author_url']) ? e($_POST['author_url']) : '' ?>">
+                <input type="url" id="author_url" name="author_url" maxlength="200" placeholder="https://..." value="<?= e(input('author_url', 200)) ?>">
             </div>
         </div>
 
         <div class="form-group">
             <label for="message">Mesajınız / Notunuz: *</label>
-            <textarea id="message" name="message" rows="3" maxlength="3000" required><?= isset($_POST['message']) ? e($_POST['message']) : '' ?></textarea>
+            <textarea id="message" name="message" rows="3" maxlength="3000" required><?= e(input('message', 3000)) ?></textarea>
         </div>
 
         <div class="form-group" style="max-width: 250px;">

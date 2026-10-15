@@ -22,29 +22,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_category'])) {
     if (!csrf_verify($_POST['csrf_token'] ?? '')) {
         $error = 'Güvenlik doğrulaması (CSRF) başarısız oldu.';
     } else {
-        $name = trim($_POST['name'] ?? '');
-        $slug = trim($_POST['slug'] ?? '');
-        $description = trim($_POST['description'] ?? '');
+        $name = input('name', 100);
+        $raw_slug = input('slug', 100);
+        $description = input('description', 255);
         $cat_id = (int)($_POST['cat_id'] ?? 0);
 
-        if (empty($name)) {
+        if ($name === '') {
             $error = 'Kategori adı boş bırakılamaz.';
         } else {
-            if (empty($slug)) {
-                $slug = slugify($name);
-            } else {
-                $slug = slugify($slug);
-            }
-
-            // Slug çakışma kontrolü
-            $check_sql = "SELECT COUNT(*) FROM categories WHERE slug = ?" . ($cat_id > 0 ? " AND id != ?" : "");
-            $check_params = $cat_id > 0 ? [$slug, $cat_id] : [$slug];
-            $check_stmt = $pdo->prepare($check_sql);
-            $check_stmt->execute($check_params);
-
-            if ((int)$check_stmt->fetchColumn() > 0) {
-                $slug .= '-' . rand(10, 99);
-            }
+            $slug_base = $raw_slug !== '' ? slugify($raw_slug) : slugify($name);
+            $slug = unique_slug('categories', $slug_base, $cat_id);
 
             if ($cat_id > 0) {
                 $old = get_category_by_id($cat_id);
@@ -75,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_category'])) {
     }
 }
 
-// Kategori Silme (CSRF korumalı)
+// Kategori Silme (CSRF korumalı ve Transaction ile atomik)
 if (isset($_GET['delete'])) {
     if (!csrf_verify($_GET['token'] ?? '')) {
         $error = 'Güvenlik hatası: Silme isteği doğrulanamadı.';
@@ -87,19 +74,26 @@ if (isset($_GET['delete'])) {
             if (mb_strtolower($catToDelete['name']) === 'genel' || mb_strtolower($catToDelete['slug']) === 'genel') {
                 $error = "'Genel' varsayılan kategorisi silinemez.";
             } else {
-                // Genel kategorisini bul veya oluştur
-                $genel = $pdo->query("SELECT id, name FROM categories WHERE slug = 'genel' OR name = 'Genel' LIMIT 1")->fetch();
-                $genelId = $genel['id'] ?? 1;
+                $pdo->beginTransaction();
+                try {
+                    // Genel kategorisini bul veya oluştur
+                    $genel = $pdo->query("SELECT id, name FROM categories WHERE slug = 'genel' OR name = 'Genel' LIMIT 1")->fetch();
+                    $genelId = $genel['id'] ?? 1;
 
-                // Bu kategorideki yazıları Genel'e taşı
-                $updPosts = $pdo->prepare("UPDATE posts SET category_id = ?, category = 'Genel' WHERE category_id = ? OR category = ?");
-                $updPosts->execute([$genelId, $del_id, $catToDelete['name']]);
+                    // Bu kategorideki yazıları Genel'e taşı
+                    $updPosts = $pdo->prepare("UPDATE posts SET category_id = ?, category = 'Genel' WHERE category_id = ? OR category = ?");
+                    $updPosts->execute([$genelId, $del_id, $catToDelete['name']]);
 
-                // Kategoriyi sil
-                $delStmt = $pdo->prepare("DELETE FROM categories WHERE id = ?");
-                $delStmt->execute([$del_id]);
+                    // Kategoriyi sil
+                    $delStmt = $pdo->prepare("DELETE FROM categories WHERE id = ?");
+                    $delStmt->execute([$del_id]);
 
-                $msg = "Kategori silindi. Bu kategoriye ait yazılar 'Genel' kategorisine aktarıldı.";
+                    $pdo->commit();
+                    $msg = "Kategori silindi. Bu kategoriye ait yazılar 'Genel' kategorisine aktarıldı.";
+                } catch (Throwable $e) {
+                    $pdo->rollBack();
+                    $error = 'Kategori silinirken bir hata oluştu.';
+                }
             }
         }
     }
@@ -206,7 +200,7 @@ include __DIR__ . '/nav.php';
                 <td>
                     <a href="/admin/categories.php?edit=<?= $cat['id'] ?>" class="btn btn-sm">Düzenle</a>
                     <?php if (mb_strtolower($cat['slug']) !== 'genel'): ?>
-                        <a href="/admin/categories.php?delete=<?= $cat['id'] ?>&token=<?= csrf_token() ?>" class="btn btn-sm btn-danger" onclick="return confirm('Bu kategoriyi silmek istediğinizden emin misiniz? Kategorideki yazılar Genel kategorisine aktarılacaktır.');">Sil</a>
+                        <a href="/admin/categories.php?delete=<?= $cat['id'] ?>&token=<?= csrf_token() ?>" class="btn btn-sm btn-danger" data-confirm="Bu kategoriyi silmek istediğinizden emin misiniz? Kategorideki yazılar Genel kategorisine aktarılacaktır.">Sil</a>
                     <?php else: ?>
                         <span style="font-size: 10px; color: #888;">[Sabit]</span>
                     <?php endif; ?>

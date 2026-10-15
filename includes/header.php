@@ -22,6 +22,7 @@ $current_script = basename($_SERVER['SCRIPT_NAME'] ?? '');
     <title><?= e($page_title) ?></title>
     <link rel="stylesheet" href="/assets/style.css">
     <link rel="alternate" type="application/rss+xml" title="<?= e($site_title) ?> RSS Beslemesi" href="/rss.xml">
+    <script src="/assets/app.js" defer></script>
     <meta name="generator" content="Personal Weblog 2000s">
 </head>
 <body>

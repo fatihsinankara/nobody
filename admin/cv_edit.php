@@ -16,21 +16,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_cv'])) {
         $error = 'Güvenlik doğrulaması (CSRF) başarısız oldu. Lütfen sayfayı yenileyip tekrar deneyin.';
     } else {
         $cv_enabled = isset($_POST['cv_enabled']) ? '1' : '0';
-        $cv_fullname = trim($_POST['cv_fullname'] ?? '');
-        $cv_headline = trim($_POST['cv_headline'] ?? '');
-        $cv_location = trim($_POST['cv_location'] ?? '');
-        $cv_email = trim($_POST['cv_email'] ?? '');
-        $cv_website = trim($_POST['cv_website'] ?? '');
-        $cv_summary = trim($_POST['cv_summary'] ?? '');
+        $cv_fullname = input('cv_fullname', 100);
+        $cv_headline = input('cv_headline', 150);
+        $cv_location = input('cv_location', 100);
+        $cv_email = input('cv_email', 120);
+        $cv_website = safe_url(input('cv_website', 200));
+        $cv_summary = input('cv_summary');
 
         // 1. İş Deneyimleri Ayrıştırma
         $experiences = [];
         if (isset($_POST['exp']) && is_array($_POST['exp'])) {
             foreach ($_POST['exp'] as $item) {
-                $period = trim($item['period'] ?? '');
-                $title = trim($item['title'] ?? '');
-                $company = trim($item['company'] ?? '');
-                $desc = trim($item['description'] ?? '');
+                if (!is_array($item)) continue;
+                $period = trim((string)($item['period'] ?? ''));
+                $title = trim((string)($item['title'] ?? ''));
+                $company = trim((string)($item['company'] ?? ''));
+                $desc = trim((string)($item['description'] ?? ''));
                 if ($title !== '' || $company !== '') {
                     $experiences[] = [
                         'period'      => $period,
@@ -46,10 +47,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_cv'])) {
         $educations = [];
         if (isset($_POST['edu']) && is_array($_POST['edu'])) {
             foreach ($_POST['edu'] as $item) {
-                $period = trim($item['period'] ?? '');
-                $degree = trim($item['degree'] ?? '');
-                $school = trim($item['school'] ?? '');
-                $desc = trim($item['description'] ?? '');
+                if (!is_array($item)) continue;
+                $period = trim((string)($item['period'] ?? ''));
+                $degree = trim((string)($item['degree'] ?? ''));
+                $school = trim((string)($item['school'] ?? ''));
+                $desc = trim((string)($item['description'] ?? ''));
                 if ($degree !== '' || $school !== '') {
                     $educations[] = [
                         'period'      => $period,
@@ -65,8 +67,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_cv'])) {
         $skills = [];
         if (isset($_POST['skill']) && is_array($_POST['skill'])) {
             foreach ($_POST['skill'] as $item) {
-                $cat = trim($item['category'] ?? '');
-                $items = trim($item['items'] ?? '');
+                if (!is_array($item)) continue;
+                $cat = trim((string)($item['category'] ?? ''));
+                $items = trim((string)($item['items'] ?? ''));
                 if ($cat !== '' || $items !== '') {
                     $skills[] = [
                         'category' => $cat,
@@ -80,9 +83,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_cv'])) {
         $projects = [];
         if (isset($_POST['proj']) && is_array($_POST['proj'])) {
             foreach ($_POST['proj'] as $item) {
-                $p_title = trim($item['title'] ?? '');
-                $p_url = trim($item['url'] ?? '');
-                $p_desc = trim($item['description'] ?? '');
+                if (!is_array($item)) continue;
+                $p_title = trim((string)($item['title'] ?? ''));
+                $p_url = safe_url(trim((string)($item['url'] ?? '')));
+                $p_desc = trim((string)($item['description'] ?? ''));
                 if ($p_title !== '') {
                     $projects[] = [
                         'title'       => $p_title,

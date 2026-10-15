@@ -28,11 +28,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify($_POST['csrf_token'] ?? '')) {
         $error = 'Güvenlik doğrulaması (CSRF) başarısız oldu. Lütfen formu tekrar gönderin.';
     } else {
-        $title = trim($_POST['title'] ?? '');
-        $slug = trim($_POST['slug'] ?? '');
+        $title = input('title', 255);
+        $raw_slug = input('slug', 255);
         $category_id = (int)($_POST['category_id'] ?? 0);
-        $summary = trim($_POST['summary'] ?? '');
-        $content = trim($_POST['content'] ?? '');
+        $summary = input('summary', 1000);
+        $content = input('content');
 
         // Kategori adını bul
         $selectedCat = get_category_by_id($category_id);
@@ -42,27 +42,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $category_id = $genel['id'] ?? 1;
         }
 
-        if (empty($title)) {
+        if ($title === '') {
             $error = 'Yazı başlığı boş bırakılamaz.';
-        } elseif (empty($content)) {
+        } elseif ($content === '') {
             $error = 'Yazı içeriği boş bırakılamaz.';
         } else {
-            if (empty($slug)) {
-                $slug = slugify($title);
-            } else {
-                $slug = slugify($slug);
-            }
-
-            // Slug çakışma kontrolü
-            $check_sql = "SELECT COUNT(*) FROM posts WHERE slug = ?" . ($is_edit ? " AND id != ?" : "");
-            $check_params = $is_edit ? [$slug, $id] : [$slug];
-            $check_stmt = $pdo->prepare($check_sql);
-            $check_stmt->execute($check_params);
-
-            if ((int)$check_stmt->fetchColumn() > 0) {
-                // Slug sonuna benzersiz sayı ekle
-                $slug .= '-' . rand(10, 99);
-            }
+            $slug_base = $raw_slug !== '' ? slugify($raw_slug) : slugify($title);
+            $slug = unique_slug('posts', $slug_base, $is_edit ? $id : 0);
 
             if ($is_edit) {
                 $upd = $pdo->prepare("UPDATE posts SET title = ?, slug = ?, category_id = ?, category = ?, summary = ?, content = ?, updated_at = NOW() WHERE id = ?");
@@ -121,13 +107,13 @@ include __DIR__ . '/nav.php';
 
     <div class="form-group">
         <label for="title">Yazı Başlığı: *</label>
-        <input type="text" id="title" name="title" required value="<?= isset($_POST['title']) ? e($_POST['title']) : ($post['title'] ?? '') ?>" placeholder="örn. Gece Yarısı Kodlama Günlükleri">
+        <input type="text" id="title" name="title" required value="<?= e($_POST['title'] ?? $post['title'] ?? '') ?>" placeholder="örn. Gece Yarısı Kodlama Günlükleri">
     </div>
 
     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
         <div class="form-group" style="flex: 2; min-width: 220px;">
             <label for="slug">Modern URL Slug (İsteğe bağlı, boş bırakılırsa başlıktan üretilir):</label>
-            <input type="text" id="slug" name="slug" value="<?= isset($_POST['slug']) ? e($_POST['slug']) : ($post['slug'] ?? '') ?>" placeholder="gece-yarisi-kodlama-gunlukleri">
+            <input type="text" id="slug" name="slug" value="<?= e($_POST['slug'] ?? $post['slug'] ?? '') ?>" placeholder="gece-yarisi-kodlama-gunlukleri">
         </div>
 
         <div class="form-group" style="flex: 1; min-width: 170px;">
@@ -157,7 +143,7 @@ include __DIR__ . '/nav.php';
 
     <div class="form-group">
         <label for="summary">Özet (Ana sayfada görünecek kısa giriş metni, isteğe bağlı):</label>
-        <textarea id="summary" name="summary" rows="2" placeholder="Yazının 1-2 cümlelik kısa özeti..."><?= isset($_POST['summary']) ? e($_POST['summary']) : ($post['summary'] ?? '') ?></textarea>
+        <textarea id="summary" name="summary" rows="2" placeholder="Yazının 1-2 cümlelik kısa özeti..."><?= e($_POST['summary'] ?? $post['summary'] ?? '') ?></textarea>
     </div>
 
     <div class="form-group">
@@ -165,7 +151,7 @@ include __DIR__ . '/nav.php';
         <div style="font-size: 11px; font-family: monospace; color: #555; margin-bottom: 4px;">
             Biçimlendirme İpuçları: <strong>**kalın**</strong>, <em>*italik*</em>, <code>`kod`</code> veya <code>[code]blok kod[/code]</code>. Paragraflar için Enter ile satır atlamanız yeterlidir.
         </div>
-        <textarea id="content" name="content" rows="16" required style="font-family: 'Courier New', Courier, monospace; font-size: 13px;"><?= isset($_POST['content']) ? e($_POST['content']) : ($post['content'] ?? '') ?></textarea>
+        <textarea id="content" name="content" rows="16" required style="font-family: 'Courier New', Courier, monospace; font-size: 13px;"><?= e($_POST['content'] ?? $post['content'] ?? '') ?></textarea>
     </div>
 
     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">

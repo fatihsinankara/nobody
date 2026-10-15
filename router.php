@@ -13,6 +13,12 @@ if (str_contains($uri, '..')) {
     die('Erişim engellendi.');
 }
 
+// Gizli dosya ve dizinlere (.git, .env vb.) doğrudan erişimi engelle
+if (preg_match('#(^|/)\.#', $uri)) {
+    header("HTTP/1.1 403 Forbidden");
+    die('Erişim engellendi.');
+}
+
 // router.php dosyasının doğrudan web üzerinden çağrılmasını engelle
 if (basename($uri) === 'router.php') {
     header("HTTP/1.1 403 Forbidden");
@@ -107,8 +113,8 @@ if (str_starts_with($uri, '/yazi/')) {
 
 // Doğrudan .php dosyası çağrıldıysa (config ve includes altı yasaklanır)
 if ($real_file && $base_dir && str_starts_with($real_file, $base_dir) && is_file($real_file)) {
-    $rel = ltrim(str_replace($base_dir, '', $real_file), '/\\');
-    if (str_starts_with($rel, 'config' . DIRECTORY_SEPARATOR) || str_starts_with($rel, 'includes' . DIRECTORY_SEPARATOR)) {
+    $rel = ltrim(str_replace(['\\', $base_dir], ['/', ''], $real_file), '/');
+    if (str_starts_with($rel, 'config/') || str_starts_with($rel, 'includes/')) {
         header("HTTP/1.1 403 Forbidden");
         die('Erişim engellendi.');
     }

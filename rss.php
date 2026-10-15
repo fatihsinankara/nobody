@@ -8,14 +8,9 @@ header('Content-Type: application/rss+xml; charset=utf-8');
 
 $site_title = get_setting('site_title', 'Kişisel Ağ Günlüğü');
 $site_subtitle = get_setting('site_subtitle', '2000\'ler Ruhuyla Saf PHP');
+$site_base = base_url();
 
-// Site temel URL'ini tespit et
-$scheme = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
-$host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-$dir = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\');
-$base_url = "$scheme://$host$dir/";
-
-$stmt = $pdo->query("SELECT * FROM posts ORDER BY created_at DESC LIMIT 20");
+$stmt = $pdo->query("SELECT title, slug, category, summary, content, created_at FROM posts ORDER BY created_at DESC LIMIT 20");
 $posts = $stmt->fetchAll();
 
 echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
@@ -23,15 +18,15 @@ echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
     <channel>
         <title><?= htmlspecialchars($site_title, ENT_XML1, 'UTF-8') ?></title>
-        <link><?= htmlspecialchars($base_url, ENT_XML1, 'UTF-8') ?></link>
+        <link><?= htmlspecialchars($site_base . '/', ENT_XML1, 'UTF-8') ?></link>
         <description><?= htmlspecialchars($site_subtitle, ENT_XML1, 'UTF-8') ?></description>
         <language>tr</language>
-        <atom:link href="<?= htmlspecialchars($base_url . 'rss.php', ENT_XML1, 'UTF-8') ?>" rel="self" type="application/rss+xml" />
+        <atom:link href="<?= htmlspecialchars($site_base . '/rss.xml', ENT_XML1, 'UTF-8') ?>" rel="self" type="application/rss+xml" />
         <lastBuildDate><?= date(DATE_RSS) ?></lastBuildDate>
 
         <?php foreach ($posts as $p): ?>
             <?php
-            $post_url = rtrim($base_url, '/') . '/yazi/' . urlencode($p['slug']);
+            $post_url = $site_base . post_url($p['slug']);
             $summary = !empty($p['summary']) ? $p['summary'] : mb_substr(strip_tags($p['content']), 0, 300) . '...';
             ?>
             <item>

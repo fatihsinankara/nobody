@@ -4,7 +4,7 @@
  */
 require_once __DIR__ . '/config/init.php';
 
-$slug = trim($_GET['slug'] ?? '');
+$slug = input('slug', 255, 'GET');
 $id = (int)($_GET['id'] ?? 0);
 
 if ($slug !== '') {
@@ -54,17 +54,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_comment'])) {
     } elseif (!check_rate_limit('comment', 5, 300)) {
         $comment_error = 'Çok sık yorum gönderiyorsunuz. Lütfen birkaç dakika sonra tekrar deneyin.';
     } else {
-        $author_name = mb_substr(trim($_POST['author_name'] ?? ''), 0, 80);
-        $author_email = mb_substr(trim($_POST['author_email'] ?? ''), 0, 120);
-        $author_url = trim($_POST['author_url'] ?? '');
-        $comment_text = mb_substr(trim($_POST['content'] ?? ''), 0, 3000);
+        $author_name = input('author_name', 80);
+        $author_email = input('author_email', 120);
+        $author_url = safe_url(input('author_url', 200));
+        $comment_text = input('content', 3000);
         $captcha_input = $_POST['captcha_answer'] ?? '';
 
-        if (empty($author_name)) {
+        if ($author_name === '') {
             $comment_error = 'Lütfen adınızı veya takma adınızı belirtin.';
-        } elseif (empty($comment_text)) {
+        } elseif ($comment_text === '') {
             $comment_error = 'Lütfen bir yorum mesajı yazın.';
         } elseif (!verify_and_refresh_captcha($captcha_input)) {
+            record_rate_limit_hit('comment');
             $comment_error = 'Güvenlik sorusunun cevabı hatalı. Lütfen tekrar deneyin.';
         } else {
             record_rate_limit_hit('comment');
@@ -73,11 +74,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_comment'])) {
                 $author_email = null;
             }
 
-            $author_url = safe_url($author_url);
+            $is_admin = is_admin_logged_in();
+            $requires_mod = (get_setting('comment_moderation', '1') === '1') && !$is_admin;
+            $is_approved = $requires_mod ? 0 : 1;
 
-            $ins_c = $pdo->prepare("INSERT INTO comments (post_id, author_name, author_email, author_url, content, created_at, is_approved) VALUES (?, ?, ?, ?, ?, NOW(), 1)");
-            $ins_c->execute([$post['id'], $author_name, $author_email, $author_url, $comment_text]);
-            $comment_success = 'Yorumunuz başarıyla eklendi. Teşekkürler!';
+            $ins_c = $pdo->prepare("INSERT INTO comments (post_id, author_name, author_email, author_url, content, created_at, is_approved) VALUES (?, ?, ?, ?, ?, NOW(), ?)");
+            $ins_c->execute([$post['id'], $author_name, $author_email, $author_url, $comment_text, $is_approved]);
+
+            $comment_success = $requires_mod
+                ? 'Yorumunuz gönderildi. Yönetici onayının ardından yayınlanacaktır. Teşekkürler!'
+                : 'Yorumunuz başarıyla eklendi. Teşekkürler!';
         }
     }
 }
@@ -207,24 +213,24 @@ include __DIR__ . '/includes/header.php';
 
             <div class="form-group">
                 <label for="author_name">İsim veya Takma Ad: *</label>
-                <input type="text" id="author_name" name="author_name" maxlength="80" required value="<?= isset($_POST['author_name']) ? e($_POST['author_name']) : '' ?>">
+                <input type="text" id="author_name" name="author_name" maxlength="80" required value="<?= e(input('author_name', 80)) ?>">
             </div>
 
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <div class="form-group" style="flex: 1; min-width: 140px;">
                     <label for="author_email">E-posta (Yayınlanmaz):</label>
-                    <input type="email" id="author_email" name="author_email" value="<?= isset($_POST['author_email']) ? e($_POST['author_email']) : '' ?>">
+                    <input type="email" id="author_email" name="author_email" maxlength="120" value="<?= e(input('author_email', 120)) ?>">
                 </div>
 
                 <div class="form-group" style="flex: 1; min-width: 140px;">
                     <label for="author_url">Web Siteniz (Varsa):</label>
-                    <input type="url" id="author_url" name="author_url" placeholder="https://..." value="<?= isset($_POST['author_url']) ? e($_POST['author_url']) : '' ?>">
+                    <input type="url" id="author_url" name="author_url" maxlength="200" placeholder="https://..." value="<?= e(input('author_url', 200)) ?>">
                 </div>
             </div>
 
             <div class="form-group">
                 <label for="content">Yorumunuz: *</label>
-                <textarea id="content" name="content" rows="4" required><?= isset($_POST['content']) ? e($_POST['content']) : '' ?></textarea>
+                <textarea id="content" name="content" rows="4" maxlength="3000" required><?= e(input('content', 3000)) ?></textarea>
             </div>
 
             <div class="form-group" style="max-width: 250px;">

@@ -4,9 +4,9 @@
  */
 require_once __DIR__ . '/config/init.php';
 
-$search_query = trim($_GET['q'] ?? '');
-$category_slug = trim($_GET['category_slug'] ?? '');
-$category_filter = trim($_GET['category'] ?? '');
+$search_query = input('q', 100, 'GET');
+$category_slug = input('category_slug', 100, 'GET');
+$category_filter = input('category', 100, 'GET');
 $matched_category = null;
 
 if ($category_slug !== '') {
@@ -29,9 +29,9 @@ if ($is_archive) {
     $page_title = 'Arama: ' . $search_query;
 }
 
-// Sayfalama parametreleri
+// Sayfalama parametreleri (aşırı offset ve tip hataları engellendi)
 $per_page = 5;
-$page = max(1, (int)($_GET['p'] ?? 1));
+$page = max(1, min(100000, (int)($_GET['p'] ?? 1)));
 $offset = ($page - 1) * $per_page;
 
 // Sorgu hazırlama
@@ -39,7 +39,7 @@ $where_clauses = [];
 $params = [];
 
 if ($search_query !== '') {
-    $where_clauses[] = "(title LIKE ? OR content LIKE ? OR summary LIKE ?)";
+    $where_clauses[] = "(p.title LIKE ? OR p.content LIKE ? OR p.summary LIKE ?)";
     $like = '%' . $search_query . '%';
     $params[] = $like;
     $params[] = $like;
@@ -47,21 +47,21 @@ if ($search_query !== '') {
 }
 
 if ($matched_category) {
-    $where_clauses[] = "(category_id = ? OR category = ?)";
+    $where_clauses[] = "(p.category_id = ? OR p.category = ?)";
     $params[] = $matched_category['id'];
     $params[] = $matched_category['name'];
 } elseif ($category_filter !== '') {
-    $where_clauses[] = "category = ?";
+    $where_clauses[] = "p.category = ?";
     $params[] = $category_filter;
 }
 
 $where_sql = !empty($where_clauses) ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
 
 // Toplam yazı sayısı
-$count_stmt = $pdo->prepare("SELECT COUNT(*) FROM posts $where_sql");
+$count_stmt = $pdo->prepare("SELECT COUNT(*) FROM posts p $where_sql");
 $count_stmt->execute($params);
 $total_posts = (int)$count_stmt->fetchColumn();
-$total_pages = ceil($total_posts / $per_page);
+$total_pages = max(1, (int)ceil($total_posts / $per_page));
 
 // Yazıları çek
 if ($is_archive) {
@@ -69,11 +69,14 @@ if ($is_archive) {
     $stmt = $pdo->query("SELECT id, title, slug, category, created_at, views FROM posts ORDER BY created_at DESC");
     $posts = $stmt->fetchAll();
 } else {
-    // Normal liste: Sayfalı
-    $query = "SELECT id, title, slug, category, summary, content, views, created_at 
-              FROM posts 
+    // Normal liste: Sayfalı ve tek sorguda yorum sayısıyla birlikte (N+1 engellendi)
+    $query = "SELECT p.id, p.title, p.slug, p.category, p.summary, p.content, p.views, p.created_at,
+                     COUNT(c.id) AS comment_count
+              FROM posts p
+              LEFT JOIN comments c ON c.post_id = p.id AND c.is_approved = 1
               $where_sql 
-              ORDER BY created_at DESC 
+              GROUP BY p.id
+              ORDER BY p.created_at DESC 
               LIMIT $per_page OFFSET $offset";
     $stmt = $pdo->prepare($query);
     $stmt->execute($params);
@@ -143,12 +146,7 @@ include __DIR__ . '/includes/header.php';
         </div>
     <?php else: ?>
         <?php foreach ($posts as $post): ?>
-            <?php
-            // Yorum sayısını al
-            $c_stmt = $pdo->prepare("SELECT COUNT(*) FROM comments WHERE post_id = ? AND is_approved = 1");
-            $c_stmt->execute([$post['id']]);
-            $comment_count = (int)$c_stmt->fetchColumn();
-            ?>
+            <?php $comment_count = (int)($post['comment_count'] ?? 0); ?>
             <article class="post-entry">
                 <h2 class="post-title">
                     <a href="<?= post_url($post['slug']) ?>"><?= e($post['title']) ?></a>
