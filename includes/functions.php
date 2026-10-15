@@ -15,6 +15,21 @@ function e(?string $str): string {
 }
 
 /**
+ * İstek parametresini her zaman string olarak döndürür.
+ * Dizi gönderilerek (?q[]=x) TypeError / 500 hatası üretilmesini engeller.
+ * $maxLen > 0 ise değer karakter bazında kısaltılır.
+ */
+function input(string $key, int $maxLen = 0, string $source = 'POST'): string {
+    $bag = $source === 'GET' ? $_GET : $_POST;
+    $val = $bag[$key] ?? '';
+    if (!is_string($val)) {
+        return '';
+    }
+    $val = trim($val);
+    return $maxLen > 0 ? mb_substr($val, 0, $maxLen) : $val;
+}
+
+/**
  * URL Güvenliği (XSS, javascript:, data: enjeksiyonu engelleme)
  * Yalnızca geçerli http:// ve https:// protokollerine izin verir.
  */
@@ -24,52 +39,75 @@ function safe_url(?string $url): string {
     }
     $url = trim($url);
     // Görünmeyen kontrol karakterlerini temizle
-    $url = preg_replace('/[\x00-\x1F\x7F]/u', '', $url);
-    
+    $url = preg_replace('/[\x00-\x1F\x7F]/u', '', $url) ?? '';
+
     // Protokol belirtilmemişse https:// varsay
     if (!preg_match('#^[a-z][a-z0-9+.-]*://#i', $url)) {
         $url = 'https://' . $url;
     }
-    
+
     $parts = parse_url($url);
     if (!$parts || empty($parts['scheme']) || empty($parts['host'])) {
         return '';
     }
-    
+
     $scheme = strtolower($parts['scheme']);
     if ($scheme !== 'http' && $scheme !== 'https') {
         return '';
     }
-    
-    if (preg_match('/^(javascript|data|vbscript|file):/i', $url)) {
-        return '';
-    }
-    
+
     return filter_var($url, FILTER_VALIDATE_URL) ? $url : '';
+}
+
+/**
+ * İstek başına bir kez yüklenen ayar önbelleği (referans döndürür)
+ */
+function &settings_store(): array {
+    static $cache = null;
+    if ($cache === null) {
+        $cache = get_db_connection()
+            ->query("SELECT setting_key, setting_val FROM settings")
+            ->fetchAll(PDO::FETCH_KEY_PAIR);
+    }
+    return $cache;
 }
 
 /**
  * Veritabanından ayar getirir (Bellek içi önbellekli)
  */
 function get_setting(string $key, string $default = ''): string {
-    static $settingsCache = null;
-    $pdo = get_db_connection();
-
-    if ($settingsCache === null) {
-        $stmt = $pdo->query("SELECT setting_key, setting_val FROM settings");
-        $settingsCache = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
-    }
-
-    return $settingsCache[$key] ?? $default;
+    $settings = &settings_store();
+    return $settings[$key] ?? $default;
 }
 
 /**
- * Ayar kaydeder veya günceller
+ * Ayar kaydeder veya günceller (önbellek de güncellenir)
  */
 function set_setting(string $key, string $value): void {
-    $pdo = get_db_connection();
-    $stmt = $pdo->prepare("INSERT INTO settings (setting_key, setting_val) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_val = VALUES(setting_val)");
+    $stmt = get_db_connection()->prepare("INSERT INTO settings (setting_key, setting_val) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_val = VALUES(setting_val)");
     $stmt->execute([$key, $value]);
+    $settings = &settings_store();
+    $settings[$key] = $value;
+}
+
+/**
+ * Uygulamaya özel gizli anahtar (IP hash'leri için HMAC tuzu)
+ */
+function app_secret(): string {
+    $secret = get_setting('app_secret');
+    if ($secret === '') {
+        $secret = bin2hex(random_bytes(32));
+        set_setting('app_secret', $secret);
+    }
+    return $secret;
+}
+
+/**
+ * Ziyaretçi IP'sinin geri çevrilemez (HMAC) özeti
+ */
+function client_hash(string $extra = ''): string {
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    return hash_hmac('sha256', $ip . '|' . $extra, app_secret());
 }
 
 /**
@@ -110,6 +148,27 @@ function slugify(string $text): string {
 }
 
 /**
+ * Tabloda benzersiz bir slug üretir (çakışmada -2, -3 ... eki ekler)
+ * $table yalnızca kod içinden sabit değerlerle çağrılır.
+ */
+function unique_slug(string $table, string $slug, int $excludeId = 0): string {
+    if (!in_array($table, ['posts', 'categories'], true)) {
+        throw new InvalidArgumentException('Geçersiz tablo.');
+    }
+    $base = $slug !== '' ? $slug : 'yazi';
+    $stmt = get_db_connection()->prepare("SELECT 1 FROM {$table} WHERE slug = ? AND id != ? LIMIT 1");
+    $candidate = $base;
+    for ($i = 2; $i < 1000; $i++) {
+        $stmt->execute([$candidate, $excludeId]);
+        if (!$stmt->fetchColumn()) {
+            return $candidate;
+        }
+        $candidate = $base . '-' . $i;
+    }
+    return $base . '-' . bin2hex(random_bytes(3));
+}
+
+/**
  * 2000'lerin klasik mekanik/dijital sayaç kutucuğu HTML'i
  */
 function render_counter(int $hits): string {
@@ -124,73 +183,84 @@ function render_counter(int $hits): string {
 }
 
 /**
+ * Sayaç değerlerini okur (gün değiştiyse bugünkü sayı 0 gösterilir)
+ */
+function get_hit_counter(): array {
+    $stmt = get_db_connection()->prepare("SELECT total_hits, IF(today_date = ?, today_hits, 0) AS today_hits FROM hit_counter WHERE id = 1");
+    $stmt->execute([date('Y-m-d')]);
+    $res = $stmt->fetch() ?: [];
+    return [
+        'total' => (int)($res['total_hits'] ?? 0),
+        'today' => (int)($res['today_hits'] ?? 0)
+    ];
+}
+
+/**
  * Ziyaretçi sayacını TEKİL (Unique) olarak takip eder.
  * Sayfa yenilemelerinde (F5) veya admin oturumlarında kesinlikle artmaz.
  * Aynı ziyaretçi gün boyunca yalnızca 1 kez tekil olarak sayılır.
  */
 function increment_hit_counter(): array {
-    $pdo = get_db_connection();
-    
-    // 1. Yönetici oturumu açıksa veya admin/kurulum/feed URL'siyse sayacı artırma
     $uri = $_SERVER['REQUEST_URI'] ?? '';
-    if (is_admin_logged_in() || str_starts_with($uri, '/admin') || str_starts_with($uri, '/rss') || str_starts_with($uri, '/install')) {
-        $stmt = $pdo->query("SELECT total_hits, today_hits FROM hit_counter WHERE id = 1");
-        $res = $stmt->fetch();
-        return [
-            'total' => (int)($res['total_hits'] ?? 0),
-            'today' => (int)($res['today_hits'] ?? 0)
-        ];
-    }
-
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
     $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
-
-    // 2. Bot / Crawler filtreleme
-    if (preg_match('/bot|crawl|slurp|spider|mediapartners|lighthouse/i', $ua)) {
-        $stmt = $pdo->query("SELECT total_hits, today_hits FROM hit_counter WHERE id = 1");
-        $res = $stmt->fetch();
-        return [
-            'total' => (int)($res['total_hits'] ?? 0),
-            'today' => (int)($res['today_hits'] ?? 0)
-        ];
-    }
-
     $today = date('Y-m-d');
-
-    // 3. Kalıcı çerez kontrolü (aynı tarayıcıda gün içi tekrar sayılmasın)
     $cookieName = 'retro_unique_v_' . date('Ymd');
-    $hasVisitedTodayCookie = isset($_COOKIE[$cookieName]);
 
-    if (!$hasVisitedTodayCookie) {
-        if (!headers_sent()) {
-            setcookie($cookieName, '1', time() + 86400, '/', '', false, true);
-        }
+    // Yönetici, admin/kurulum/feed URL'leri, botlar ve bugün zaten sayılmış tarayıcılar
+    if (isset($_COOKIE[$cookieName])
+        || is_admin_logged_in()
+        || preg_match('#^/(admin|rss|install)#', $uri)
+        || preg_match('/bot|crawl|slurp|spider|mediapartners|lighthouse/i', $ua)) {
+        return get_hit_counter();
+    }
 
-        // 4. IP + Tarayıcı Hash'i (Kişisel veri gizliliği için hash'lenir)
-        $ip_hash = hash('sha256', $ip . '|' . substr($ua, 0, 60));
+    if (!headers_sent()) {
+        setcookie($cookieName, '1', [
+            'expires'  => time() + 86400,
+            'path'     => '/',
+            'secure'   => is_https(),
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+    }
 
-        // Veritabanında (ip_hash, visit_date) PRIMARY KEY ile tekillik garantilenir
-        $ins = $pdo->prepare("INSERT IGNORE INTO unique_visitors (ip_hash, visit_date, created_at) VALUES (?, ?, NOW())");
-        $ins->execute([$ip_hash, $today]);
+    $pdo = get_db_connection();
 
-        // Veritabanına gerçekten YENİ bir tekil satır eklendiyse sayacı 1 artır!
-        if ($ins->rowCount() > 0) {
-            $checkDate = $pdo->query("SELECT today_date FROM hit_counter WHERE id = 1")->fetchColumn();
-            if ($checkDate !== $today) {
-                $upd = $pdo->prepare("UPDATE hit_counter SET today_date = ?, today_hits = 1, total_hits = total_hits + 1 WHERE id = 1");
-                $upd->execute([$today]);
-            } else {
-                $pdo->exec("UPDATE hit_counter SET today_hits = today_hits + 1, total_hits = total_hits + 1 WHERE id = 1");
-            }
+    // IP + Tarayıcı HMAC özeti (Kişisel veri gizliliği için geri çevrilemez)
+    $ins = $pdo->prepare("INSERT IGNORE INTO unique_visitors (ip_hash, visit_date, created_at) VALUES (?, ?, NOW())");
+    $ins->execute([client_hash(substr($ua, 0, 60)), $today]);
+
+    // Veritabanına gerçekten YENİ bir tekil satır eklendiyse tek sorguda sayacı artır
+    if ($ins->rowCount() > 0) {
+        $upd = $pdo->prepare("UPDATE hit_counter
+                              SET today_hits = IF(today_date = ?, today_hits + 1, 1),
+                                  today_date = ?,
+                                  total_hits = total_hits + 1
+                              WHERE id = 1");
+        $upd->execute([$today, $today]);
+
+        // Olasılıksal temizlik: 2 günden eski tekillik kayıtlarına gerek yok
+        if (mt_rand(1, 100) === 1) {
+            $pdo->prepare("DELETE FROM unique_visitors WHERE visit_date < ?")
+                ->execute([date('Y-m-d', strtotime('-2 days'))]);
         }
     }
 
-    $stmt = $pdo->query("SELECT total_hits, today_hits FROM hit_counter WHERE id = 1");
-    $res = $stmt->fetch();
-    return [
-        'total' => (int)($res['total_hits'] ?? 0),
-        'today' => (int)($res['today_hits'] ?? 0)
-    ];
+    return get_hit_counter();
+}
+
+/**
+ * HTTPS bağlantısı mı?
+ */
+function is_https(): bool {
+    return !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+}
+
+/**
+ * Yönetici oturum anahtarlarını temizler
+ */
+function clear_admin_session(): void {
+    unset($_SESSION['admin_user_id'], $_SESSION['admin_username'], $_SESSION['admin_display_name'], $_SESSION['admin_ua'], $_SESSION['admin_last_activity']);
 }
 
 /**
@@ -201,17 +271,18 @@ function is_admin_logged_in(): bool {
         return false;
     }
 
+    // Oturum çalma (Session Hijacking) koruması: Tarayıcı imzası doğrulaması
+    if (($_SESSION['admin_ua'] ?? null) !== ($_SERVER['HTTP_USER_AGENT'] ?? '')) {
+        clear_admin_session();
+        return false;
+    }
+
     // 2 saatlik hareketsizlik zaman aşımı (Inactivity timeout)
-    if (isset($_SESSION['admin_last_activity']) && (time() - (int)$_SESSION['admin_last_activity'] > 7200)) {
-        unset($_SESSION['admin_user_id'], $_SESSION['admin_username'], $_SESSION['admin_display_name'], $_SESSION['admin_ua'], $_SESSION['admin_last_activity']);
+    if (time() - (int)($_SESSION['admin_last_activity'] ?? 0) > 7200) {
+        clear_admin_session();
         return false;
     }
     $_SESSION['admin_last_activity'] = time();
-
-    // Oturum çalma (Session Hijacking) koruması: Tarayıcı imzası doğrulaması
-    if (isset($_SESSION['admin_ua']) && $_SESSION['admin_ua'] !== ($_SERVER['HTTP_USER_AGENT'] ?? '')) {
-        return false;
-    }
 
     return true;
 }
@@ -221,7 +292,7 @@ function is_admin_logged_in(): bool {
  */
 function require_admin(): void {
     if (!is_admin_logged_in()) {
-        header('Location: login.php');
+        header('Location: /admin/login.php');
         exit;
     }
 }
@@ -231,10 +302,10 @@ function require_admin(): void {
  */
 function get_categories(): array {
     $pdo = get_db_connection();
-    $stmt = $pdo->query("SELECT c.id, c.name, c.slug, COUNT(p.id) as count 
-                         FROM categories c 
-                         LEFT JOIN posts p ON (p.category_id = c.id OR p.category = c.name) 
-                         GROUP BY c.id, c.name, c.slug 
+    $stmt = $pdo->query("SELECT c.id, c.name, c.slug, COUNT(p.id) AS count
+                         FROM categories c
+                         LEFT JOIN posts p ON p.category_id = c.id
+                         GROUP BY c.id, c.name, c.slug
                          ORDER BY count DESC, c.name ASC");
     return $stmt->fetchAll();
 }
@@ -244,8 +315,10 @@ function get_categories(): array {
  */
 function get_all_categories(): array {
     $pdo = get_db_connection();
-    $stmt = $pdo->query("SELECT c.*, (SELECT COUNT(*) FROM posts p WHERE p.category_id = c.id OR p.category = c.name) as post_count 
-                         FROM categories c 
+    $stmt = $pdo->query("SELECT c.*, COUNT(p.id) AS post_count
+                         FROM categories c
+                         LEFT JOIN posts p ON p.category_id = c.id
+                         GROUP BY c.id
                          ORDER BY c.name ASC");
     return $stmt->fetchAll();
 }
@@ -284,8 +357,8 @@ function get_recent_posts(int $limit = 5): array {
  */
 function get_math_captcha(): array {
     if (!isset($_SESSION['math_captcha']) || !is_array($_SESSION['math_captcha'])) {
-        $n1 = rand(2, 9);
-        $n2 = rand(1, 8);
+        $n1 = random_int(2, 9);
+        $n2 = random_int(1, 8);
         $_SESSION['math_captcha'] = [
             'question' => "$n1 + $n2 = ?",
             'answer'   => $n1 + $n2
@@ -301,7 +374,7 @@ function verify_and_refresh_captcha(mixed $userAnswer): bool {
     $correctAnswer = (int)$_SESSION['math_captcha']['answer'];
     unset($_SESSION['math_captcha']); // Tek kullanımlık
 
-    if ($userAnswer === '' || $userAnswer === null || !is_numeric($userAnswer)) {
+    if (!is_string($userAnswer) || $userAnswer === '' || !is_numeric($userAnswer)) {
         return false;
     }
 
@@ -312,36 +385,41 @@ function verify_and_refresh_captcha(mixed $userAnswer): bool {
  * Metin içeriğini paragraflar ve satır sonlarıyla temiz HTML'e dönüştürür
  */
 function render_content(string $content): string {
-    // Güvenlik için önce XSS temizliği
-    $safe = e($content);
+    // Güvenlik için önce XSS temizliği (yer tutucu karakteri kullanıcıdan gelemez)
+    $safe = e(str_replace("\x00", '', $content));
 
-    // Basit ve nostaljik BBCode / biçimlendirme desteği
-    // **kalın** veya [b]kalın[/b]
-    $safe = preg_replace('/\*\*(.*?)\*\*/', '<strong>$1</strong>', $safe);
-    $safe = preg_replace('/\[b\](.*?)\[\/b\]/i', '<strong>$1</strong>', $safe);
-    // *italik* veya [i]italik[/i]
-    $safe = preg_replace('/\*([^\*]+)\*/', '<em>$1</em>', $safe);
-    $safe = preg_replace('/\[i\](.*?)\[\/i\]/i', '<em>$1</em>', $safe);
-    // `kod` veya [code]kod[/code]
-    $safe = preg_replace('/`([^`]+)`/', '<code>$1</code>', $safe);
-    $safe = preg_replace('/\[code\](.*?)\[\/code\]/is', '<pre><code>$1</code></pre>', $safe);
+    // Kod blokları ve bağlantılar yer tutucuya alınır; içlerine biçimlendirme uygulanmaz
+    $blocks = [];
+    $hold = static function (string $html) use (&$blocks): string {
+        $blocks[] = $html;
+        return "\x00" . (count($blocks) - 1) . "\x00";
+    };
+
+    // [code]blok[/code] ve `kod`
+    $safe = preg_replace_callback('/\[code\](.*?)\[\/code\]/is', fn($m) => $hold('<pre><code>' . trim($m[1], "\r\n") . '</code></pre>'), $safe);
+    $safe = preg_replace_callback('/`([^`\n]+)`/', fn($m) => $hold('<code>' . $m[1] . '</code>'), $safe);
 
     // Güvenli BBCode Bağlantı: [url=https://...]Bağlantı[/url] veya [url]https://...[/url]
-    $safe = preg_replace_callback('/\[url=(.*?)\](.*?)\[\/url\]/i', function($matches) {
-        $url = safe_url($matches[1]);
-        $text = $matches[2];
-        if (empty($url)) return $text;
-        return '<a href="' . e($url) . '" target="_blank" rel="nofollow noopener noreferrer">' . $text . '</a>';
-    }, $safe);
+    $link = static function (string $escapedUrl, ?string $text) use ($hold): string {
+        $url = safe_url(html_entity_decode($escapedUrl, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        if ($url === '') {
+            return $text ?? $escapedUrl;
+        }
+        return $hold('<a href="' . e($url) . '" target="_blank" rel="nofollow noopener noreferrer">' . ($text ?? e($url)) . '</a>');
+    };
+    $safe = preg_replace_callback('/\[url=(.*?)\](.*?)\[\/url\]/i', fn($m) => $link($m[1], $m[2]), $safe);
+    $safe = preg_replace_callback('/\[url\](.*?)\[\/url\]/i', fn($m) => $link($m[1], null), $safe);
 
-    $safe = preg_replace_callback('/\[url\](.*?)\[\/url\]/i', function($matches) {
-        $url = safe_url($matches[1]);
-        if (empty($url)) return $matches[1];
-        return '<a href="' . e($url) . '" target="_blank" rel="nofollow noopener noreferrer">' . e($url) . '</a>';
-    }, $safe);
+    // **kalın** / [b]kalın[/b], *italik* / [i]italik[/i]
+    $safe = preg_replace('/\*\*(.+?)\*\*/s', '<strong>$1</strong>', $safe);
+    $safe = preg_replace('/\[b\](.*?)\[\/b\]/is', '<strong>$1</strong>', $safe);
+    $safe = preg_replace('/\*([^\*\n]+)\*/', '<em>$1</em>', $safe);
+    $safe = preg_replace('/\[i\](.*?)\[\/i\]/is', '<em>$1</em>', $safe);
 
-    // Paragraf ve satır sonları
-    return nl2br($safe);
+    // Paragraf ve satır sonları (kod blokları hâlâ yer tutucu olduğu için etkilenmez)
+    $safe = nl2br($safe);
+
+    return preg_replace_callback('/\x00(\d+)\x00/', fn($m) => $blocks[(int)$m[1]] ?? '', $safe);
 }
 
 /**
@@ -361,8 +439,8 @@ function csrf_field(): string {
     return '<input type="hidden" name="csrf_token" value="' . e(csrf_token()) . '">';
 }
 
-function csrf_verify(?string $token): bool {
-    if (empty($token) || empty($_SESSION['csrf_token'])) {
+function csrf_verify(mixed $token): bool {
+    if (!is_string($token) || $token === '' || empty($_SESSION['csrf_token'])) {
         return false;
     }
     return hash_equals($_SESSION['csrf_token'], $token);
@@ -387,16 +465,9 @@ function check_rate_limit(string $action, int $maxAttempts = 5, int $decaySecond
 
     // 2. IP Hash Veritabanı Kontrolü (Çerezsiz bot veya saldırganlara karşı)
     try {
-        $pdo = get_db_connection();
-        $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
-        $ip_hash = hash('sha256', $ip);
-        $since = $now - $decaySeconds;
-
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM rate_limits WHERE ip_hash = ? AND action_key = ? AND created_at > ?");
-        $stmt->execute([$ip_hash, $action, $since]);
-        $ip_hits = (int)$stmt->fetchColumn();
-
-        if ($ip_hits >= $maxAttempts) {
+        $stmt = get_db_connection()->prepare("SELECT COUNT(*) FROM rate_limits WHERE ip_hash = ? AND action_key = ? AND created_at > ?");
+        $stmt->execute([client_hash(), $action, $now - $decaySeconds]);
+        if ((int)$stmt->fetchColumn() >= $maxAttempts) {
             return false;
         }
     } catch (Throwable $e) {
@@ -419,16 +490,12 @@ function record_rate_limit_hit(string $action): void {
     // 2. Veritabanına kaydet
     try {
         $pdo = get_db_connection();
-        $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
-        $ip_hash = hash('sha256', $ip);
-
         $stmt = $pdo->prepare("INSERT INTO rate_limits (ip_hash, action_key, created_at) VALUES (?, ?, ?)");
-        $stmt->execute([$ip_hash, $action, $now]);
+        $stmt->execute([client_hash(), $action, $now]);
 
         // Olasılıksal eski kayıt temizliği (Her 25 istekte 1 kez 1 saatten eski kayıtları temizler)
         if (mt_rand(1, 25) === 1) {
-            $cleanup = $now - 3600;
-            $pdo->prepare("DELETE FROM rate_limits WHERE created_at < ?")->execute([$cleanup]);
+            $pdo->prepare("DELETE FROM rate_limits WHERE created_at < ?")->execute([$now - 3600]);
         }
     } catch (Throwable $e) {
         // Sessizce devam et
@@ -438,11 +505,8 @@ function record_rate_limit_hit(string $action): void {
 function reset_rate_limit(string $action): void {
     unset($_SESSION['rate_limit_' . $action]);
     try {
-        $pdo = get_db_connection();
-        $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
-        $ip_hash = hash('sha256', $ip);
-        $stmt = $pdo->prepare("DELETE FROM rate_limits WHERE ip_hash = ? AND action_key = ?");
-        $stmt->execute([$ip_hash, $action]);
+        $stmt = get_db_connection()->prepare("DELETE FROM rate_limits WHERE ip_hash = ? AND action_key = ?");
+        $stmt->execute([client_hash(), $action]);
     } catch (Throwable $e) {
         // Sessizce devam et
     }
@@ -459,3 +523,18 @@ function post_url(string $slug): string {
     return '/yazi/' . urlencode($slug);
 }
 
+/**
+ * Mutlak site adresi (RSS vb. için). Kurulumda kaydedilen adres kullanılır;
+ * Host başlığı yalnızca geri dönüş olarak ve doğrulanarak kullanılır.
+ */
+function base_url(): string {
+    $saved = get_setting('site_url');
+    if ($saved !== '' && safe_url($saved) !== '') {
+        return rtrim($saved, '/');
+    }
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    if (!preg_match('/^[A-Za-z0-9.\-]+(:\d{1,5})?$/', $host)) {
+        $host = 'localhost';
+    }
+    return (is_https() ? 'https' : 'http') . '://' . $host;
+}

@@ -10,11 +10,15 @@
  * veritabanı bilgilerinizi elle de girebilirsiniz.
  */
 
+if (!defined('APP_INIT')) {
+    exit;
+}
+
 const DB_HOST = '127.0.0.1';
 const DB_PORT = 3306;
 const DB_NAME = 'nobody';
 const DB_USER = 'nobody';
-const DB_PASS = 'nobody';
+const DB_PASS = 'CHANGE_ME';
 
 function get_db_connection(): PDO {
     static $pdo = null;
@@ -29,6 +33,7 @@ function get_db_connection(): PDO {
             $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
         } catch (PDOException $e) {
             error_log('Database connection error: ' . $e->getMessage());
+            http_response_code(503);
             die('Veritabanına bağlanılamadı. Lütfen yapılandırma ayarlarını kontrol ediniz.');
         }
     }

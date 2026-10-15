@@ -19,34 +19,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!check_rate_limit('admin_login', 5, 600)) {
         $error = 'Çok fazla başarısız giriş denemesi yapıldı. Lütfen 10 dakika sonra tekrar deneyin.';
     } else {
-        $username = trim($_POST['username'] ?? '');
-        $password = $_POST['password'] ?? '';
+        $username = input('username', 50);
+        $password = is_string($_POST['password'] ?? null) ? $_POST['password'] : '';
 
-        if (empty($username) || empty($password)) {
+        if ($username === '' || $password === '') {
             $error = 'Kullanıcı adı ve parola gereklidir.';
         } else {
-            $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
+            $stmt = $pdo->prepare("SELECT id, username, display_name, password_hash FROM users WHERE username = ?");
             $stmt->execute([$username]);
             $user = $stmt->fetch();
 
-            // Zamanlama (Timing) saldırılarına karşı sabit süreli doğrulama
-            $dummyHash = '$2y$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUU1234567890';
-            $passwordValid = false;
-            if ($user && !empty($user['password_hash'])) {
-                $passwordValid = password_verify($password, $user['password_hash']);
-            } else {
-                password_verify($password, $dummyHash);
-            }
+            // Zamanlama (Timing) saldırılarına karşı sabit süreli doğrulama:
+            // Kullanıcı yoksa PASSWORD_DEFAULT (bcrypt, cost 12) ile aynı maliyette geçerli bir sahte hash doğrulanır.
+            $dummyHash = '$2y$12$nqTP9FIh7buHTM67V.saL.ZnQxFlTlzS0C73QMf1L13aJAgLOQOOG';
+            $passwordValid = password_verify($password, $user['password_hash'] ?? $dummyHash) && $user;
 
             if ($passwordValid) {
                 // Session Fixation saldırılarına karşı oturum kimliğini yenile
                 session_regenerate_id(true);
+
+                // Hash algoritması/maliyeti güncellendiyse şifreyi yeniden hash'le
+                if (password_needs_rehash($user['password_hash'], PASSWORD_DEFAULT)) {
+                    $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")
+                        ->execute([password_hash($password, PASSWORD_DEFAULT), $user['id']]);
+                }
 
                 $_SESSION['admin_user_id'] = $user['id'];
                 $_SESSION['admin_username'] = $user['username'];
                 $_SESSION['admin_display_name'] = $user['display_name'];
                 $_SESSION['admin_ua'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
                 $_SESSION['admin_last_activity'] = time();
+                $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 
                 reset_rate_limit('admin_login');
 
