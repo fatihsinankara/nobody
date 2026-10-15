@@ -1,0 +1,30 @@
+# Apache URL Rewrite Kuralları (Clean URLs)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Mevcut dosya ve dizinleri doğrudan sun
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Özel Yönlendirmeler
+    RewriteRule ^arsiv/?$ index.php?archive=1 [L,QSA]
+    RewriteRule ^defter/?$ guestbook.php [L,QSA]
+    RewriteRule ^hakkimda/?$ about.php [L,QSA]
+    RewriteRule ^cv/?$ cv.php [L,QSA]
+    RewriteRule ^kategori/([a-zA-Z0-9_-]+)/?$ index.php?category_slug=$1 [L,QSA]
+    RewriteRule ^rss\.xml$ rss.php [L,QSA]
+    RewriteRule ^rss/?$ rss.php [L,QSA]
+    RewriteRule ^install/?$ install.php [L,QSA]
+    RewriteRule ^yazi/([a-zA-Z0-9_-]+)/?$ post.php?slug=$1 [L,QSA]
+
+    # Kök slug yönlendirmesi
+    RewriteRule ^([a-zA-Z0-9_-]+)/?$ post.php?slug=$1 [L,QSA]
+</IfModule>
+
+# Güvenlik: Hassas dosyaları ve klasörleri gizle
+<FilesMatch "(installed\.lock|\.sqlite|\.env|\.git)">
+    Order allow,deny
+    Deny from all
+</FilesMatch>

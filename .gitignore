@@ -1,0 +1,75 @@
+# =========================================================================
+# Nostaljik Kişisel Ağ Günlüğü (2000s Pure PHP Weblog) - .gitignore
+# =========================================================================
+
+# 1. Kurulum ve Yerel Yapılandırma (Security & Local Configuration)
+# Kurulum sihirbazı (/install.php) bu dosyaları sunucuda dinamik üretir.
+# Gizli veritabanı şifrelerinizin GitHub'a sızmaması ve her kuranın 
+# kendi kurulumunu yapabilmesi için yoksayılır:
+config/installed.lock
+config/database.php
+!config/database.example.php
+
+# 2. İşletim Sistemi Kalıntıları (OS Generated Files)
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
+*~
+.directory
+
+# 3. Kod Editörleri ve IDE Ayarları (Editors & IDEs)
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.bak
+*.sublime-workspace
+*.sublime-project
+nbproject/
+.buildpath
+.project
+.settings/
+
+# 4. Günlük Dosyaları, Hata Kayıtları ve Geçici Dosyalar (Logs & Temp)
+*.log
+error_log
+php_errors.log
+*.tmp
+*.temp
+
+# 5. Veritabanı Yedekleri ve SQL Dökümleri (Database Dumps)
+*.sql
+*.sqlite
+*.sqlite3
+*.dump
+
+# 6. Bağımlılıklar & Geliştirme Betikleri
+vendor/
+node_modules/
+.env
+.env.*
+!.env.example
+scratch/
+test_*.php
+check_*.php
