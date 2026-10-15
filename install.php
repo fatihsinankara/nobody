@@ -20,8 +20,8 @@ require_once __DIR__ . '/includes/functions.php';
 $error = '';
 $success = '';
 
-// Zaten kuruluysa ve admin değilse uyar
-if ($is_installed && empty($_SESSION['admin_user_id'])) {
+// Zaten kuruluysa kesin olarak kilitle ve durdur
+if ($is_installed) {
     $page_title = 'Kurulum Zaten Tamamlandı';
     ?>
     <!DOCTYPE html>
@@ -164,11 +164,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['do_install'])) {
 
             $pdo->exec("CREATE TABLE IF NOT EXISTS hit_counter (
                 id INT PRIMARY KEY,
-                total_hits INT UNSIGNED NOT NULL DEFAULT 0
+                total_hits INT UNSIGNED NOT NULL DEFAULT 0,
+                today_date DATE NULL,
+                today_hits INT UNSIGNED NOT NULL DEFAULT 0
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            $pdo->exec("CREATE TABLE IF NOT EXISTS unique_visitors (
+                ip_hash VARCHAR(64) NOT NULL,
+                visit_date DATE NOT NULL,
+                created_at DATETIME NOT NULL,
+                PRIMARY KEY (ip_hash, visit_date)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            $pdo->exec("CREATE TABLE IF NOT EXISTS rate_limits (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                ip_hash VARCHAR(64) NOT NULL,
+                action_key VARCHAR(50) NOT NULL,
+                created_at INT UNSIGNED NOT NULL,
+                INDEX idx_rate_lookup (ip_hash, action_key, created_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
             // Sayaç
-            $pdo->exec("INSERT INTO hit_counter (id, total_hits) VALUES (1, 1024) ON DUPLICATE KEY UPDATE id=id");
+            $pdo->exec("INSERT INTO hit_counter (id, total_hits, today_date, today_hits) VALUES (1, 1024, CURDATE(), 1) ON DUPLICATE KEY UPDATE id=id");
 
             // 5. Yönetici Hesabını Oluştur
             $hash = password_hash($admin_pass, PASSWORD_DEFAULT);
@@ -255,7 +272,8 @@ function get_db_connection(): PDO {
         try {
             \$pdo = new PDO(\$dsn, DB_USER, DB_PASS, \$options);
         } catch (PDOException \$e) {
-            die('Veritabanına bağlanılamadı: ' . htmlspecialchars(\$e->getMessage()));
+            error_log('Database connection error: ' . \$e->getMessage());
+            die('Veritabanına bağlanılamadı. Lütfen yapılandırma ayarlarını kontrol ediniz.');
         }
     }
     return \$pdo;

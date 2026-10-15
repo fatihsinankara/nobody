@@ -7,10 +7,24 @@
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 $uri = rawurldecode($uri);
 
+// Path traversal (Dizin atlatma '..') saldırılarını anında engelle
+if (str_contains($uri, '..')) {
+    header("HTTP/1.1 403 Forbidden");
+    die('Erişim engellendi.');
+}
+
+// router.php dosyasının doğrudan web üzerinden çağrılmasını engelle
+if (basename($uri) === 'router.php') {
+    header("HTTP/1.1 403 Forbidden");
+    die('Erişim engellendi.');
+}
+
 // Statik varlıklar (CSS, Görseller, İkonlar)
 $file_path = __DIR__ . $uri;
-if ($uri !== '/' && file_exists($file_path) && !is_dir($file_path)) {
-    $ext = pathinfo($file_path, PATHINFO_EXTENSION);
+$real_file = realpath($file_path);
+$base_dir = realpath(__DIR__);
+if ($real_file && $base_dir && str_starts_with($real_file, $base_dir) && is_file($real_file)) {
+    $ext = pathinfo($real_file, PATHINFO_EXTENSION);
     if (in_array(strtolower($ext), ['css', 'js', 'png', 'jpg', 'jpeg', 'gif', 'ico', 'svg', 'txt', 'woff', 'woff2'])) {
         return false; // PHP yerleşik sunucusunun doğrudan servis etmesine izin ver
     }
@@ -75,13 +89,15 @@ if ($uri === '/admin' || $uri === '/admin/') {
 
 if (str_starts_with($uri, '/admin/')) {
     $admin_file = __DIR__ . $uri;
-    if (file_exists($admin_file) && is_file($admin_file)) {
-        require $admin_file;
+    $real = realpath($admin_file);
+    $admin_dir = realpath(__DIR__ . '/admin');
+    if ($real && $admin_dir && str_starts_with($real, $admin_dir . DIRECTORY_SEPARATOR) && is_file($real) && pathinfo($real, PATHINFO_EXTENSION) === 'php') {
+        require $real;
         exit;
     }
 }
 
-// Modern Yazı Slug'ı (/yazi/slug-metni veya doğrudan /slug-metni)
+// Modern Yazı Slug'ı (/yazi/slug-metni)
 if (str_starts_with($uri, '/yazi/')) {
     $slug = substr($uri, 6);
     $_GET['slug'] = $slug;
@@ -89,10 +105,17 @@ if (str_starts_with($uri, '/yazi/')) {
     exit;
 }
 
-// Doğrudan .php dosyası çağrıldıysa
-if (file_exists(__DIR__ . $uri) && is_file(__DIR__ . $uri)) {
-    require __DIR__ . $uri;
-    exit;
+// Doğrudan .php dosyası çağrıldıysa (config ve includes altı yasaklanır)
+if ($real_file && $base_dir && str_starts_with($real_file, $base_dir) && is_file($real_file)) {
+    $rel = ltrim(str_replace($base_dir, '', $real_file), '/\\');
+    if (str_starts_with($rel, 'config' . DIRECTORY_SEPARATOR) || str_starts_with($rel, 'includes' . DIRECTORY_SEPARATOR)) {
+        header("HTTP/1.1 403 Forbidden");
+        die('Erişim engellendi.');
+    }
+    if (pathinfo($real_file, PATHINFO_EXTENSION) === 'php') {
+        require $real_file;
+        exit;
+    }
 }
 
 // Kök dizinde doğrudan slug eşleşmesi (örn: /merhaba-dunya...)

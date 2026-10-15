@@ -1,9 +1,20 @@
-# Apache URL Rewrite Kuralları (Clean URLs)
+# Apache Güvenlik ve URL Rewrite Yapılandırması
+Options -Indexes -MultiViews
+
+# Hassas dosya ve uzantılara doğrudan erişimi engelle
+<FilesMatch "(^#.*#|\.(bak|config|dist|fla|inc|ini|log|psd|sh|sql|sw[op]|env|lock|git|md)|installed\.lock|database\.php)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# config ve includes dizinlerini tamamen web erişimine kapat
+RedirectMatch 403 ^/(config|includes)/.*$
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteBase /
 
-    # Mevcut dosya ve dizinleri doğrudan sun
+    # Mevcut statik dosya ve dizinleri doğrudan sun
     RewriteCond %{REQUEST_FILENAME} -f [OR]
     RewriteCond %{REQUEST_FILENAME} -d
     RewriteRule ^ - [L]
@@ -22,9 +33,3 @@
     # Kök slug yönlendirmesi
     RewriteRule ^([a-zA-Z0-9_-]+)/?$ post.php?slug=$1 [L,QSA]
 </IfModule>
-
-# Güvenlik: Hassas dosyaları ve klasörleri gizle
-<FilesMatch "(installed\.lock|\.sqlite|\.env|\.git)">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
