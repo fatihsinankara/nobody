@@ -95,6 +95,23 @@ Tarayıcınızda açın:
 
 ---
 
+## ⚡ cPanel Git Version Control ile Dağıtım (Deploy)
+
+Proje kök dizininde hazır bir [`.cpanel.yml`](.cpanel.yml) dosyası bulunmaktadır. cPanel üzerinden tek tıkla canlıya almak için:
+
+1. cPanel hesabınıza girip **Git™ Sürüm Kontrolü (Git™ Version Control)** menüsünü açın.
+2. **Oluştur (Create)** butonuna basın ve GitHub depo adresinizi girin (`https://github.com/fatihsinankara/nobody.git`).
+3. [`.cpanel.yml`](.cpanel.yml) dosyasındaki `DEPLOYPATH` satırında yer alan `username` kısmını kendi cPanel kullanıcı adınızla güncelleyin:
+   ```yaml
+   - export DEPLOYPATH=/home/KULLANICI_ADINIZ/public_html/
+   ```
+4. **Yönet (Manage) » Çek veya Dağıt (Pull or Deploy)** sekmesine geçip:
+   * **Uzak Konumdan Güncelle (Update from Remote)**
+   * **HEAD İşlemesini Dağıt (Deploy HEAD Commit)** butonuna tıklayın.
+5. Proje dosyaları ve `.htaccess` otomatik olarak `public_html/` dizinine aktarılacak ve siteniz yayına hazır olacaktır!
+
+---
+
 ## 📁 Dizin Mimarisi
 
 ```text
@@ -129,7 +146,8 @@ Tarayıcınızda açın:
 ├── rss.php                    # Standart RSS 2.0 XML akışı
 ├── install.php                # Kurulum sihirbazı
 ├── router.php                 # Yerel geliştirme temiz URL yönlendiricisi
-├── .htaccess                  # Apache mod_rewrite kuralları
+├── .htaccess                  # Apache mod_rewrite ve dizin koruma kuralları
+├── .cpanel.yml                # cPanel Git Version Control otomatik dağıtım yapılandırması
 ├── .gitignore                 # Güvenlik ve temiz depo yapılandırması
 └── README.md
 ```

@@ -1,0 +1,15 @@
+---
+deployment:
+  tasks:
+    # -------------------------------------------------------------------------
+    # cPanel Git Version Control Dağıtım (Deployment) Yapılandırması
+    # -------------------------------------------------------------------------
+    # DİKKAT: 'username' kısmını cPanel kullanıcı adınızla değiştiriniz.
+    # Örnek: /home/fatih/public_html/ veya /home/fatih/blog/
+    # -------------------------------------------------------------------------
+    - export DEPLOYPATH=/home/username/public_html/
+    - /bin/mkdir -p $DEPLOYPATH
+    # Proje dosyalarını ve dizinlerini (.git hariç) canlı dizine kopyala:
+    - /bin/cp -R admin assets config includes *.php $DEPLOYPATH
+    # Apache temiz URL kuralları için .htaccess dosyasını kopyala:
+    - /bin/cp .htaccess $DEPLOYPATH
