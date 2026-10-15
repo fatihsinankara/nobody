@@ -29,13 +29,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$username]);
             $user = $stmt->fetch();
 
-            if ($user && password_verify($password, $user['password_hash'])) {
+            // Zamanlama (Timing) saldırılarına karşı sabit süreli doğrulama
+            $dummyHash = '$2y$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUU1234567890';
+            $passwordValid = false;
+            if ($user && !empty($user['password_hash'])) {
+                $passwordValid = password_verify($password, $user['password_hash']);
+            } else {
+                password_verify($password, $dummyHash);
+            }
+
+            if ($passwordValid) {
                 // Session Fixation saldırılarına karşı oturum kimliğini yenile
                 session_regenerate_id(true);
 
                 $_SESSION['admin_user_id'] = $user['id'];
                 $_SESSION['admin_username'] = $user['username'];
                 $_SESSION['admin_display_name'] = $user['display_name'];
+                $_SESSION['admin_ua'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
+                $_SESSION['admin_last_activity'] = time();
 
                 reset_rate_limit('admin_login');
 
