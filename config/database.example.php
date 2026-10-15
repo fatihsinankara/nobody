@@ -28,7 +28,8 @@ function get_db_connection(): PDO {
         try {
             $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
         } catch (PDOException $e) {
-            die('Veritabanına bağlanılamadı: ' . htmlspecialchars($e->getMessage()));
+            error_log('Database connection error: ' . $e->getMessage());
+            die('Veritabanına bağlanılamadı. Lütfen yapılandırma ayarlarını kontrol ediniz.');
         }
     }
     return $pdo;
