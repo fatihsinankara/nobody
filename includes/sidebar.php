@@ -86,9 +86,12 @@ $blogroll = json_decode($blogroll_json, true) ?: [];
         <div class="sidebar-title">Dost Bağlantılar</div>
         <?php if (!empty($blogroll)): ?>
             <ul>
-                <?php foreach ($blogroll as $link): ?>
+                <?php foreach ($blogroll as $link): 
+                    $s_url = safe_url($link['url'] ?? '');
+                    if (empty($s_url)) continue;
+                ?>
                     <li>
-                        <a href="<?= e($link['url']) ?>" target="_blank" rel="noopener noreferrer">
+                        <a href="<?= e($s_url) ?>" target="_blank" rel="noopener noreferrer">
                             <?= e($link['title']) ?> ↗
                         </a>
                     </li>

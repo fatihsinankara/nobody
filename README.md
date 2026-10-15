@@ -14,10 +14,14 @@
   * `http://localhost:8000/rss.xml`
   * Hem PHP dahili sunucusu (`router.php`) hem de Apache sunucuları (`.htaccess`) ile tam uyumlu.
 * **Üst Düzey Güvenlik (Hardened Security):**
-  * **CSRF Koruması:** Tüm formlarda ve silme/onaylama işlemlerinde kriptografik CSRF belirteçleri (`csrf_token()`, `csrf_field()`, `csrf_verify()`).
-  * **Brute-Force & Spam Hız Sınırlayıcı (Rate Limiting):** Yönetici giriş denemelerinde ve yorum/ziyaretçi defteri gönderimlerinde hız aşım koruması.
-  * **Session Hardening:** `session.cookie_httponly = 1`, `session.cookie_samesite = 'Lax'`, giriş anında `session_regenerate_id(true)` ile Session Fixation koruması.
-  * **SQL Injection & XSS:** Tüm sorgularda PDO Prepared Statements ve evrensel `htmlspecialchars()` filtreleme.
+  * **HTTP Güvenlik Başlıkları:** `X-Frame-Options` (Clickjacking koruması), `X-Content-Type-Options: nosniff`, `Referrer-Policy`, modern sıkı `Content-Security-Policy` (CSP) ve `Permissions-Policy`.
+  * **Çift Katmanlı Hız Sınırlayıcı (Rate Limiting):** Brute-force ve spam saldırılarına karşı hem `$_SESSION` hem de veritabanı `rate_limits` tablosu üzerinde **IP Hash** denetimi (saldırgan çerezleri silse dahi IP üzerinden engellenir).
+  * **Anti-Bot Honeypot & Matematik Doğrulama:** Yorum ve defter formlarında botları yakalayan gizli tuzak alanlar ve tek kullanımlık dinamik matematik testi.
+  * **CSRF & XSS Koruması:** Tüm formlarda ve silme/onaylama işlemlerinde kriptografik `csrf_token()` koruması, `ENT_HTML5` XSS filtreleme ve `safe_url()` ile `javascript:`, `data:` enjeksiyonlarının önlenmesi.
+  * **Dizin Atlatma & Hassas Dosya Koruması (Path Traversal):** `router.php` ve `.htaccess` ile `config/`, `includes/`, `installed.lock` ve `..` içeren dizin atlatma isteklerine anında `403 Forbidden`.
+  * **Session Hardening & Zaman Aşımı:** `session.use_strict_mode = 1`, `session.cookie_httponly = 1`, `session.cookie_samesite = 'Lax'`, tarayıcı imzası (User-Agent) eşleme, 2 saatlik hareketsizlik zaman aşımı ve giriş anında `session_regenerate_id(true)`.
+  * **Zamanlama Saldırısı Koruması (Constant-time Auth):** Giriş panelinde kullanıcı mevcut olsun ya da olmasın sabit süreli `password_verify()` çalıştırılarak kullanıcı adı tespiti engellenir.
+  * **SQL Injection Önleme:** Tüm sorgularda katı PDO Prepared Statements ve bağlantı hatalarında sunucu şifrelerini gizleyen güvenli hata yönetimi.
 * **Kurulum Sihirbazı (`/install.php`):**
   * Veritabanı bağlantı bilgilerini, site başlığını ve yönetici hesabını tarayıcı üzerinden kolayca yapılandıran kurulum ekranı.
   * Kurulum tamamlandığında `config/installed.lock` ile güvenli şekilde kilitlenir.

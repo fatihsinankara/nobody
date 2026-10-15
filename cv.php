@@ -74,8 +74,8 @@ include __DIR__ . '/includes/header.php';
             <?php if (!empty($cv_email)): ?>
                 <span><strong>E-posta:</strong> <a href="mailto:<?= e($cv_email) ?>"><?= e($cv_email) ?></a></span>
             <?php endif; ?>
-            <?php if (!empty($cv_website)): ?>
-                <span><strong>Web:</strong> <a href="<?= e($cv_website) ?>" target="_blank" rel="noopener noreferrer"><?= e($cv_website) ?></a></span>
+            <?php if (!empty($cv_website) && safe_url($cv_website)): ?>
+                <span><strong>Web:</strong> <a href="<?= e(safe_url($cv_website)) ?>" target="_blank" rel="noopener noreferrer"><?= e($cv_website) ?></a></span>
             <?php endif; ?>
         </div>
     </div>
@@ -191,8 +191,11 @@ include __DIR__ . '/includes/header.php';
                 <div style="margin-bottom: 12px;">
                     <div>
                         <strong style="font-size: 13px; color: #111;"><?= e($proj['title']) ?></strong>
-                        <?php if (!empty($proj['url'])): ?>
-                            &mdash; <a href="<?= e($proj['url']) ?>" target="_blank" rel="noopener noreferrer" style="font-size: 11px; font-family: monospace;">[<?= e($proj['url']) ?> ↗]</a>
+                        <?php 
+                        $p_url = safe_url($proj['url'] ?? '');
+                        if (!empty($p_url)): 
+                        ?>
+                            &mdash; <a href="<?= e($p_url) ?>" target="_blank" rel="noopener noreferrer" style="font-size: 11px; font-family: monospace;">[<?= e($proj['url']) ?> ↗]</a>
                         <?php endif; ?>
                     </div>
                     <?php if (!empty($proj['description'])): ?>

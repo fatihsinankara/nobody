@@ -71,12 +71,15 @@ include __DIR__ . '/includes/header.php';
 
     <?php if (!empty($blogroll)): ?>
         <ul style="padding-left: 20px; line-height: 1.8;">
-            <?php foreach ($blogroll as $link): ?>
+            <?php foreach ($blogroll as $link): 
+                $s_url = safe_url($link['url'] ?? '');
+                if (empty($s_url)) continue;
+            ?>
                 <li>
-                    <a href="<?= e($link['url']) ?>" target="_blank" rel="noopener noreferrer" style="font-weight: bold;">
+                    <a href="<?= e($s_url) ?>" target="_blank" rel="noopener noreferrer" style="font-weight: bold;">
                         <?= e($link['title']) ?>
                     </a>
-                    &mdash; <span style="font-family: 'Courier New', monospace; font-size: 11px; color: #555;"><?= e($link['url']) ?></span>
+                    &mdash; <span style="font-family: 'Courier New', monospace; font-size: 11px; color: #555;"><?= e($s_url) ?></span>
                 </li>
             <?php endforeach; ?>
         </ul>
