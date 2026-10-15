@@ -7,9 +7,19 @@
 define('APP_INIT', true);
 $page_start_time = microtime(true);
 
+ini_set('display_errors', '0');
+header('X-Frame-Options: DENY');
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: no-referrer');
+header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
+
 if (session_status() === PHP_SESSION_NONE) {
-    ini_set('session.cookie_httponly', '1');
-    session_start();
+    session_start([
+        'use_strict_mode' => 1,
+        'cookie_httponly' => 1,
+        'cookie_samesite' => 'Strict',
+        'cookie_secure'   => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 1 : 0,
+    ]);
 }
 
 $lock_file = __DIR__ . '/config/installed.lock';
@@ -18,7 +28,7 @@ $is_installed = file_exists($lock_file);
 require_once __DIR__ . '/includes/functions.php';
 
 $error = '';
-$success = '';
+$success = false;
 
 // Zaten kuruluysa kesin olarak kilitle ve durdur
 if ($is_installed) {
@@ -52,242 +62,130 @@ if ($is_installed) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['do_install'])) {
-    $db_host = trim($_POST['db_host'] ?? '127.0.0.1');
-    $db_port = (int)($_POST['db_port'] ?? 3306);
-    $db_name = trim($_POST['db_name'] ?? 'nobody');
-    $db_user = trim($_POST['db_user'] ?? 'nobody');
-    $db_pass = $_POST['db_pass'] ?? '';
+    $db_host = input('db_host') ?: '127.0.0.1';
+    $db_port = (int)(input('db_port') ?: 3306);
+    $db_name = input('db_name');
+    $db_user = input('db_user');
+    $db_pass = is_string($_POST['db_pass'] ?? null) ? $_POST['db_pass'] : '';
 
-    $site_title = trim($_POST['site_title'] ?? 'Kişisel Ağ Günlüğü');
-    $site_subtitle = trim($_POST['site_subtitle'] ?? 'Düşünceler, notlar ve anılar...');
-    $webmaster_name = trim($_POST['webmaster_name'] ?? 'nobody');
+    $site_title = input('site_title', 150) ?: 'Kişisel Ağ Günlüğü';
+    $site_subtitle = input('site_subtitle', 250);
+    $webmaster_name = input('webmaster_name', 100) ?: 'webmaster';
 
-    $admin_user = trim($_POST['admin_user'] ?? 'nobody');
-    $admin_pass = $_POST['admin_pass'] ?? '';
-    $admin_pass_confirm = $_POST['admin_pass_confirm'] ?? '';
+    $admin_user = input('admin_user');
+    $admin_pass = is_string($_POST['admin_pass'] ?? null) ? $_POST['admin_pass'] : '';
+    $admin_pass_confirm = is_string($_POST['admin_pass_confirm'] ?? null) ? $_POST['admin_pass_confirm'] : '';
     $load_samples = isset($_POST['load_samples']);
 
-    if (empty($db_host) || empty($db_name) || empty($db_user)) {
-        $error = 'Veritabanı sunucu, ad ve kullanıcı bilgileri zorunludur.';
-    } elseif (empty($admin_user) || empty($admin_pass)) {
-        $error = 'Yönetici kullanıcı adı ve şifresi boş bırakılamaz.';
-    } elseif (strlen($admin_pass) < 4) {
-        $error = 'Yönetici şifresi en az 4 karakter olmalıdır.';
+    if (!csrf_verify($_POST['csrf_token'] ?? '')) {
+        $error = 'Güvenlik doğrulaması (CSRF) başarısız oldu. Lütfen formu yenileyip tekrar deneyin.';
+    } elseif (!preg_match('/^[A-Za-z0-9.\-]{1,253}$/', $db_host)) {
+        $error = 'Geçersiz veritabanı sunucu adresi.';
+    } elseif ($db_port < 1 || $db_port > 65535) {
+        $error = 'Geçersiz port numarası.';
+    } elseif (!preg_match('/^[A-Za-z0-9_]{1,64}$/', $db_name)) {
+        $error = 'Veritabanı adı yalnızca harf, rakam ve alt çizgi içerebilir.';
+    } elseif (!preg_match('/^[A-Za-z0-9_.\-]{1,32}$/', $db_user)) {
+        $error = 'Veritabanı kullanıcı adı yalnızca harf, rakam, nokta, tire ve alt çizgi içerebilir.';
+    } elseif (!preg_match('/^[A-Za-z0-9_.\-]{3,50}$/', $admin_user)) {
+        $error = 'Yönetici kullanıcı adı 3-50 karakter olmalı; yalnızca harf, rakam, nokta, tire ve alt çizgi içerebilir.';
+    } elseif (strlen($admin_pass) < 10) {
+        $error = 'Yönetici şifresi en az 10 karakter olmalıdır.';
     } elseif ($admin_pass !== $admin_pass_confirm) {
         $error = 'Yönetici şifreleri eşleşmiyor.';
     } else {
         try {
-            // 1. MySQL Bağlantısını Test Et (Veritabanı olmadan)
-            $dsn_no_db = sprintf('mysql:host=%s;port=%d;charset=utf8mb4', $db_host, $db_port);
-            $pdo_test = new PDO($dsn_no_db, $db_user, $db_pass, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
-            ]);
-
-            // 2. Veritabanını oluştur (varsa koru)
-            $pdo_test->exec("CREATE DATABASE IF NOT EXISTS `$db_name` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;");
-
-            // 3. Veritabanına bağlan
-            $dsn_with_db = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $db_host, $db_port, $db_name);
-            $pdo = new PDO($dsn_with_db, $db_user, $db_pass, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-            ]);
-
-            // 4. Tabloları Oluştur
-            $pdo->exec("CREATE TABLE IF NOT EXISTS settings (
-                setting_key VARCHAR(64) PRIMARY KEY,
-                setting_val TEXT NOT NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-            $pdo->exec("CREATE TABLE IF NOT EXISTS users (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                username VARCHAR(50) NOT NULL UNIQUE,
-                password_hash VARCHAR(255) NOT NULL,
-                display_name VARCHAR(100) NOT NULL,
-                created_at DATETIME NOT NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-            $pdo->exec("CREATE TABLE IF NOT EXISTS categories (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                name VARCHAR(100) NOT NULL UNIQUE,
-                slug VARCHAR(100) NOT NULL UNIQUE,
-                description TEXT NULL,
-                created_at DATETIME NOT NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-            $pdo->exec("CREATE TABLE IF NOT EXISTS posts (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                title VARCHAR(255) NOT NULL,
-                slug VARCHAR(255) NOT NULL UNIQUE,
-                category_id INT NULL,
-                category VARCHAR(100) NOT NULL DEFAULT 'Genel',
-                summary TEXT NULL,
-                content MEDIUMTEXT NOT NULL,
-                views INT UNSIGNED NOT NULL DEFAULT 0,
-                created_at DATETIME NOT NULL,
-                updated_at DATETIME NOT NULL,
-                INDEX idx_cat_id (category_id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-            // Başlangıç Kategorileri
-            $stmtC = $pdo->query("SELECT COUNT(*) FROM categories");
-            if ((int)$stmtC->fetchColumn() === 0) {
-                $insC = $pdo->prepare("INSERT INTO categories (name, slug, description, created_at) VALUES (?, ?, ?, NOW())");
-                $insC->execute(['Genel', 'genel', 'Genel yazılar ve düşünceler.']);
-                $insC->execute(['Günlük', 'gunluk', 'Gündelik notlar ve anılar.']);
-                $insC->execute(['Yazılım', 'yazilim', 'Kodlar, mimari ve yazılım notları.']);
-                $insC->execute(['Nostalji', 'nostalji', 'Eski internet, 2000ler ve retro hatıralar.']);
-                $insC->execute(['Müzik', 'muzik', 'Albümler, şarkılar ve dinleme notları.']);
-            }
-
-            $pdo->exec("CREATE TABLE IF NOT EXISTS comments (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                post_id INT NOT NULL,
-                author_name VARCHAR(100) NOT NULL,
-                author_email VARCHAR(150) NULL,
-                author_url VARCHAR(200) NULL,
-                content TEXT NOT NULL,
-                created_at DATETIME NOT NULL,
-                is_approved TINYINT(1) NOT NULL DEFAULT 1,
-                INDEX idx_post (post_id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-            $pdo->exec("CREATE TABLE IF NOT EXISTS guestbook (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                author_name VARCHAR(100) NOT NULL,
-                author_city VARCHAR(100) NULL,
-                author_url VARCHAR(200) NULL,
-                message TEXT NOT NULL,
-                created_at DATETIME NOT NULL,
-                is_approved TINYINT(1) NOT NULL DEFAULT 1
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-            $pdo->exec("CREATE TABLE IF NOT EXISTS hit_counter (
-                id INT PRIMARY KEY,
-                total_hits INT UNSIGNED NOT NULL DEFAULT 0,
-                today_date DATE NULL,
-                today_hits INT UNSIGNED NOT NULL DEFAULT 0
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-            $pdo->exec("CREATE TABLE IF NOT EXISTS unique_visitors (
-                ip_hash VARCHAR(64) NOT NULL,
-                visit_date DATE NOT NULL,
-                created_at DATETIME NOT NULL,
-                PRIMARY KEY (ip_hash, visit_date)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-            $pdo->exec("CREATE TABLE IF NOT EXISTS rate_limits (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                ip_hash VARCHAR(64) NOT NULL,
-                action_key VARCHAR(50) NOT NULL,
-                created_at INT UNSIGNED NOT NULL,
-                INDEX idx_rate_lookup (ip_hash, action_key, created_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-            // Sayaç
-            $pdo->exec("INSERT INTO hit_counter (id, total_hits, today_date, today_hits) VALUES (1, 1024, CURDATE(), 1) ON DUPLICATE KEY UPDATE id=id");
-
-            // 5. Yönetici Hesabını Oluştur
-            $hash = password_hash($admin_pass, PASSWORD_DEFAULT);
-            $stmtUser = $pdo->prepare("INSERT INTO users (username, password_hash, display_name, created_at) 
-                VALUES (?, ?, ?, NOW()) 
-                ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), display_name = VALUES(display_name)");
-            $stmtUser->execute([$admin_user, $hash, $webmaster_name]);
-
-            // 6. Site Ayarlarını Kaydet
-            $settings = [
-                'site_title'        => $site_title,
-                'site_subtitle'     => $site_subtitle,
-                'webmaster_name'    => $webmaster_name,
-                'about_enabled'     => '1',
-                'guestbook_enabled' => '1',
-                'cv_enabled'        => '1',
-                'current_mood'      => 'Kahveli & Melankolik ☕',
-                'now_playing'       => 'Radiohead - Karma Police (Winamp v2.91)',
-                'about_text'        => "Merhaba! Ben " . e($webmaster_name) . ". 2000'lerin başındaki yalın, samimi ve gürültüsüz internet ruhunu yaşatmak için bu kişisel köşeyi açtım. Sonsuz kaydırmalara ve bildirim çılgınlığına inat; sadece metin, fikir ve samimiyet.",
-                'blogroll_links'    => json_encode([
-                    ['title' => 'W3Schools (Referans)', 'url' => 'https://www.w3schools.com'],
-                    ['title' => 'Internet Archive (Geçmişe Yolculuk)', 'url' => 'https://archive.org'],
-                    ['title' => 'Hacker News', 'url' => 'https://news.ycombinator.com'],
-                ], JSON_UNESCAPED_UNICODE)
+            $pdoOptions = [
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES   => false,
             ];
 
+            // 1. MySQL Bağlantısını Test Et ve veritabanını oluştur (ad yukarıda beyaz listeyle doğrulandı)
+            $pdo_test = new PDO(sprintf('mysql:host=%s;port=%d;charset=utf8mb4', $db_host, $db_port), $db_user, $db_pass, $pdoOptions);
+            $pdo_test->exec("CREATE DATABASE IF NOT EXISTS `{$db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+            $pdo_test = null;
+
+            // 2. Veritabanına bağlan ve şemayı kur
+            $pdo = new PDO(sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $db_host, $db_port, $db_name), $db_user, $db_pass, $pdoOptions);
+            require_once __DIR__ . '/includes/schema.php';
+            install_schema($pdo, $load_samples);
+
+            // 3. Yönetici Hesabını Oluştur
+            $stmtUser = $pdo->prepare("INSERT INTO users (username, password_hash, display_name, created_at)
+                VALUES (?, ?, ?, NOW())
+                ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), display_name = VALUES(display_name)");
+            $stmtUser->execute([$admin_user, password_hash($admin_pass, PASSWORD_DEFAULT), $webmaster_name]);
+
+            // 4. Site Ayarlarını Kaydet
+            $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+            $site_url = preg_match('/^[A-Za-z0-9.\-]+(:\d{1,5})?$/', $host)
+                ? (is_https() ? 'https' : 'http') . '://' . $host
+                : '';
+            $settings = [
+                'site_title'     => $site_title,
+                'site_subtitle'  => $site_subtitle,
+                'webmaster_name' => $webmaster_name,
+                'cv_fullname'    => $webmaster_name,
+                'site_url'       => $site_url,
+            ];
+            $insSetting = $pdo->prepare("INSERT INTO settings (setting_key, setting_val) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_val = VALUES(setting_val)");
             foreach ($settings as $k => $v) {
-                $insSetting = $pdo->prepare("INSERT INTO settings (setting_key, setting_val) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_val = VALUES(setting_val)");
                 $insSetting->execute([$k, $v]);
             }
 
-            // 7. Örnek İçerikler (İstenirse)
-            if ($load_samples) {
-                $stmt = $pdo->query("SELECT COUNT(*) FROM posts");
-                if ((int)$stmt->fetchColumn() === 0) {
-                    $samplePosts = [
-                        [
-                            'title' => 'Merhaba Dünya: Kişisel Web Günlüğüm Yayında!',
-                            'slug' => 'merhaba-dunya-kisisel-web-gunlugum-yayinda',
-                            'category' => 'Günlük',
-                            'summary' => 'Modern internetin gürültüsünden kaçıp kendi küçük, huzurlu HTML adamı inşa ettim.',
-                            'content' => "Göz alıcı animasyonlar, her köşeden fırlayan bildirimler ve sonsuz algoritmik akışlar...\n\nBazen 2000'lerin o sade internetini çok özlüyorum. Notepad ile açıp yazdığımız sayfalar, Winamp'tan çalan MP3'ler ve gerçekten 'okumak' için ziyaret edilen kişisel günlükler.\n\nİşte bu blog tam olarak o günlerin ruhunu günümüze taşımak için var. Hoş geldiniz!"
-                        ],
-                        [
-                            'title' => 'Winamp, ICQ ve IRC: Dijital Çağın Altın Günleri',
-                            'slug' => 'winamp-icq-ve-irc-dijital-cagin-altin-gunleri',
-                            'category' => 'Nostalji',
-                            'summary' => 'Bir zamanlar internet sadece istediğimiz zaman girdiğimiz samimi bir odaydı.',
-                            'content' => "Eskiden internet 'içinde yaşadığımız' değil, 'ziyaret ettiğimiz' bir yerdi. Okuldan veya işten eve gelir, modemin bağlanmasını beklerdik. ICQ'nun o meşhur 'Uh-oh!' sesi duyulduğunda ekrana hafif bir tebessüm yayılırdı.\n\nBu blogda o samimiyeti yaşatmak istiyorum. Ziyaretçi defterine bir selam bırakmayı unutmayın!"
-                        ]
-                    ];
-                    $insP = $pdo->prepare("INSERT INTO posts (title, slug, category, summary, content, views, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 42, NOW(), NOW())");
-                    foreach ($samplePosts as $sp) {
-                        $insP->execute([$sp['title'], $sp['slug'], $sp['category'], $sp['summary'], $sp['content']]);
-                    }
-
-                    $pdo->exec("INSERT INTO guestbook (author_name, author_city, author_url, message, created_at, is_approved) 
-                        VALUES ('Nostalji Sever', 'İstanbul', 'https://example.com', 'Siteniz hayırlı olsun! 2000\'ler internetini çok özlemiştik.', NOW(), 1)");
-                }
-            }
-
-            // 8. config/database.php dosyasını yeni ayarlarla güncelle
-            $dbFileContent = <<<PHP
-<?php
-/**
- * Veritabanı Yapılandırması ve PDO Bağlantısı
- */
-
-const DB_HOST = '{$db_host}';
-const DB_PORT = {$db_port};
-const DB_NAME = '{$db_name}';
-const DB_USER = '{$db_user}';
-const DB_PASS = '{$db_pass}';
-
+            // 5. config/database.php dosyasını güvenli biçimde üret (var_export ile kod enjeksiyonu imkânsız)
+            $dbFileContent = "<?php\n"
+                . "/**\n * Veritabanı Yapılandırması ve PDO Bağlantısı (Kurulum sihirbazı tarafından üretildi)\n */\n\n"
+                . "if (!defined('APP_INIT')) {\n    exit;\n}\n\n"
+                . 'const DB_HOST = ' . var_export($db_host, true) . ";\n"
+                . 'const DB_PORT = ' . var_export($db_port, true) . ";\n"
+                . 'const DB_NAME = ' . var_export($db_name, true) . ";\n"
+                . 'const DB_USER = ' . var_export($db_user, true) . ";\n"
+                . 'const DB_PASS = ' . var_export($db_pass, true) . ";\n\n"
+                . <<<'PHP'
 function get_db_connection(): PDO {
-    static \$pdo = null;
-    if (\$pdo === null) {
-        \$dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', DB_HOST, DB_PORT, DB_NAME);
-        \$options = [
+    static $pdo = null;
+    if ($pdo === null) {
+        $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', DB_HOST, DB_PORT, DB_NAME);
+        $options = [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES   => false,
         ];
         try {
-            \$pdo = new PDO(\$dsn, DB_USER, DB_PASS, \$options);
-        } catch (PDOException \$e) {
-            error_log('Database connection error: ' . \$e->getMessage());
+            $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+        } catch (PDOException $e) {
+            error_log('Database connection error: ' . $e->getMessage());
+            http_response_code(503);
             die('Veritabanına bağlanılamadı. Lütfen yapılandırma ayarlarını kontrol ediniz.');
         }
     }
-    return \$pdo;
+    return $pdo;
 }
+
 PHP;
-            file_put_contents(__DIR__ . '/config/database.php', $dbFileContent);
 
-            // 9. Kurulum kilit dosyasını oluştur
-            file_put_contents($lock_file, date('Y-m-d H:i:s') . " - Installed successfully by $admin_user\n");
+            $configPath = __DIR__ . '/config/database.php';
+            $tmpPath = $configPath . '.tmp';
+            if (file_put_contents($tmpPath, $dbFileContent, LOCK_EX) === false || !rename($tmpPath, $configPath)) {
+                throw new RuntimeException('config/database.php yazılamadı. Dizin yazma izinlerini kontrol edin.');
+            }
+            @chmod($configPath, 0640);
 
+            // 6. Kurulum kilit dosyasını oluştur
+            if (file_put_contents($lock_file, date('Y-m-d H:i:s') . " - Installed\n", LOCK_EX) === false) {
+                throw new RuntimeException('config/installed.lock oluşturulamadı.');
+            }
+
+            unset($_SESSION['csrf_token']);
             $success = true;
 
-        } catch (Exception $e) {
-            $error = 'Kurulum Hatası: ' . $e->getMessage();
+        } catch (Throwable $e) {
+            error_log('Install error: ' . $e->getMessage());
+            $error = $e instanceof PDOException
+                ? 'Veritabanı hatası: Bağlantı bilgilerini ve kullanıcı yetkilerini kontrol edin.'
+                : 'Kurulum Hatası: ' . $e->getMessage();
         }
     }
 }
@@ -348,33 +246,34 @@ PHP;
             <div class="alert alert-error"><?= e($error) ?></div>
         <?php endif; ?>
 
-        <form action="/install.php" method="POST">
-            
+        <form action="/install.php" method="POST" autocomplete="off">
+            <?= csrf_field() ?>
+
             <div class="section-title">1. Veritabanı Bağlantısı (MySQL)</div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <div class="form-group" style="flex: 2; min-width: 180px;">
                     <label for="db_host">Sunucu (Host):</label>
-                    <input type="text" id="db_host" name="db_host" required value="<?= e($_POST['db_host'] ?? '127.0.0.1') ?>">
+                    <input type="text" id="db_host" name="db_host" required value="<?= e(input('db_host') ?: '127.0.0.1') ?>">
                 </div>
                 <div class="form-group" style="flex: 1; min-width: 100px;">
                     <label for="db_port">Port:</label>
-                    <input type="number" id="db_port" name="db_port" required value="<?= e($_POST['db_port'] ?? '3306') ?>">
+                    <input type="number" id="db_port" name="db_port" required min="1" max="65535" value="<?= e(input('db_port') ?: '3306') ?>">
                 </div>
             </div>
 
             <div class="form-group">
                 <label for="db_name">Veritabanı Adı (Yoksa otomatik oluşturulur):</label>
-                <input type="text" id="db_name" name="db_name" required value="<?= e($_POST['db_name'] ?? 'nobody') ?>">
+                <input type="text" id="db_name" name="db_name" required pattern="[A-Za-z0-9_]{1,64}" value="<?= e(input('db_name') ?: 'nobody') ?>">
             </div>
 
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <div class="form-group" style="flex: 1; min-width: 160px;">
                     <label for="db_user">Veritabanı Kullanıcısı:</label>
-                    <input type="text" id="db_user" name="db_user" required value="<?= e($_POST['db_user'] ?? 'nobody') ?>">
+                    <input type="text" id="db_user" name="db_user" required value="<?= e(input('db_user')) ?>">
                 </div>
                 <div class="form-group" style="flex: 1; min-width: 160px;">
                     <label for="db_pass">Veritabanı Parolası:</label>
-                    <input type="password" id="db_pass" name="db_pass" value="<?= e($_POST['db_pass'] ?? 'nobody') ?>">
+                    <input type="password" id="db_pass" name="db_pass" autocomplete="new-password">
                 </div>
             </div>
 
@@ -382,33 +281,33 @@ PHP;
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <div class="form-group" style="flex: 2; min-width: 200px;">
                     <label for="site_title">Blog Başlığı:</label>
-                    <input type="text" id="site_title" name="site_title" required value="<?= e($_POST['site_title'] ?? 'Kişisel Ağ Günlüğü') ?>">
+                    <input type="text" id="site_title" name="site_title" required maxlength="150" value="<?= e(input('site_title') ?: 'Kişisel Ağ Günlüğü') ?>">
                 </div>
                 <div class="form-group" style="flex: 1; min-width: 140px;">
                     <label for="webmaster_name">Adınız / Takma Ad:</label>
-                    <input type="text" id="webmaster_name" name="webmaster_name" required value="<?= e($_POST['webmaster_name'] ?? 'nobody') ?>">
+                    <input type="text" id="webmaster_name" name="webmaster_name" required maxlength="100" value="<?= e(input('webmaster_name')) ?>">
                 </div>
             </div>
 
             <div class="form-group">
                 <label for="site_subtitle">Blog Sloganı / Alt Başlık:</label>
-                <input type="text" id="site_subtitle" name="site_subtitle" required value="<?= e($_POST['site_subtitle'] ?? 'Düşünceler, notlar ve dijital hatıralar...') ?>">
+                <input type="text" id="site_subtitle" name="site_subtitle" maxlength="250" value="<?= e(input('site_subtitle') ?: 'Düşünceler, notlar ve dijital hatıralar...') ?>">
             </div>
 
             <div class="section-title">3. Yönetici Hesabı (Webmaster)</div>
             <div class="form-group">
                 <label for="admin_user">Yönetici Kullanıcı Adı:</label>
-                <input type="text" id="admin_user" name="admin_user" required value="<?= e($_POST['admin_user'] ?? 'nobody') ?>">
+                <input type="text" id="admin_user" name="admin_user" required pattern="[A-Za-z0-9_.\-]{3,50}" value="<?= e(input('admin_user')) ?>">
             </div>
 
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <div class="form-group" style="flex: 1; min-width: 160px;">
-                    <label for="admin_pass">Yönetici Şifresi:</label>
-                    <input type="password" id="admin_pass" name="admin_pass" required value="nobody">
+                    <label for="admin_pass">Yönetici Şifresi (en az 10 karakter):</label>
+                    <input type="password" id="admin_pass" name="admin_pass" required minlength="10" autocomplete="new-password">
                 </div>
                 <div class="form-group" style="flex: 1; min-width: 160px;">
                     <label for="admin_pass_confirm">Şifre Tekrarı:</label>
-                    <input type="password" id="admin_pass_confirm" name="admin_pass_confirm" required value="nobody">
+                    <input type="password" id="admin_pass_confirm" name="admin_pass_confirm" required minlength="10" autocomplete="new-password">
                 </div>
             </div>
 
