@@ -26,14 +26,17 @@ $success = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_guestbook'])) {
     if (!csrf_verify($_POST['csrf_token'] ?? '')) {
         $error = 'Güvenlik doğrulaması (CSRF) başarısız oldu. Lütfen formu yenileyin.';
+    } elseif (!empty($_POST['website_hp'])) {
+        // Honeypot yakalandı - bot tespit edildi
+        $error = 'İşlem güvenlik nedeniyle durduruldu.';
     } elseif (!check_rate_limit('guestbook', 3, 300)) {
         $error = 'Kısa sürede çok fazla mesaj gönderdiniz. Lütfen birkaç dakika bekleyin.';
     } else {
-        $author_name = trim($_POST['author_name'] ?? '');
-        $author_city = trim($_POST['author_city'] ?? '');
-        $author_url = trim($_POST['author_url'] ?? '');
-        $message = trim($_POST['message'] ?? '');
-        $captcha_input = (int)($_POST['captcha_answer'] ?? -1);
+        $author_name = mb_substr(trim($_POST['author_name'] ?? ''), 0, 80);
+        $author_city = mb_substr(trim($_POST['author_city'] ?? ''), 0, 60);
+        $author_url = safe_url(trim($_POST['author_url'] ?? ''));
+        $message = mb_substr(trim($_POST['message'] ?? ''), 0, 3000);
+        $captcha_input = $_POST['captcha_answer'] ?? '';
 
         if (empty($author_name)) {
             $error = 'Lütfen adınızı veya takma adınızı belirtin.';
@@ -43,10 +46,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_guestbook'])) 
             $error = 'Güvenlik sorusu hatalı girildi. Lütfen tekrar deneyin.';
         } else {
             record_rate_limit_hit('guestbook');
-
-            if (!empty($author_url) && !preg_match('#^https?://#i', $author_url)) {
-                $author_url = 'http://' . $author_url;
-            }
 
             $ins = $pdo->prepare("INSERT INTO guestbook (author_name, author_city, author_url, message, created_at, is_approved) VALUES (?, ?, ?, ?, NOW(), 1)");
             $ins->execute([$author_name, $author_city, $author_url, $message]);
@@ -107,15 +106,21 @@ include __DIR__ . '/includes/header.php';
     <form action="/defter" method="POST">
         <?= csrf_field() ?>
 
+        <!-- Anti-Spam Honeypot (Botlar için gizli tuzak alan) -->
+        <div style="display:none;" aria-hidden="true">
+            <label for="website_hp">Bu alanı boş bırakın:</label>
+            <input type="text" id="website_hp" name="website_hp" value="" tabindex="-1" autocomplete="off">
+        </div>
+
         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
             <div class="form-group" style="flex: 1; min-width: 140px;">
                 <label for="author_name">İsminiz: *</label>
-                <input type="text" id="author_name" name="author_name" required value="<?= isset($_POST['author_name']) ? e($_POST['author_name']) : '' ?>">
+                <input type="text" id="author_name" name="author_name" maxlength="80" required value="<?= isset($_POST['author_name']) ? e($_POST['author_name']) : '' ?>">
             </div>
 
             <div class="form-group" style="flex: 1; min-width: 140px;">
                 <label for="author_city">Şehir / Ülke:</label>
-                <input type="text" id="author_city" name="author_city" placeholder="örn. İstanbul veya Berlin" value="<?= isset($_POST['author_city']) ? e($_POST['author_city']) : '' ?>">
+                <input type="text" id="author_city" name="author_city" maxlength="60" placeholder="örn. İstanbul veya Berlin" value="<?= isset($_POST['author_city']) ? e($_POST['author_city']) : '' ?>">
             </div>
 
             <div class="form-group" style="flex: 1; min-width: 140px;">
@@ -126,7 +131,7 @@ include __DIR__ . '/includes/header.php';
 
         <div class="form-group">
             <label for="message">Mesajınız / Notunuz: *</label>
-            <textarea id="message" name="message" rows="3" required><?= isset($_POST['message']) ? e($_POST['message']) : '' ?></textarea>
+            <textarea id="message" name="message" rows="3" maxlength="3000" required><?= isset($_POST['message']) ? e($_POST['message']) : '' ?></textarea>
         </div>
 
         <div class="form-group" style="max-width: 250px;">
@@ -151,8 +156,11 @@ include __DIR__ . '/includes/header.php';
             <div class="guestbook-entry">
                 <div class="gb-header">
                     <span class="gb-author">
-                        <?php if (!empty($item['author_url'])): ?>
-                            <a href="<?= e($item['author_url']) ?>" target="_blank" rel="nofollow noopener"><?= e($item['author_name']) ?></a>
+                        <?php 
+                        $item_url = safe_url($item['author_url'] ?? '');
+                        if (!empty($item_url)): 
+                        ?>
+                            <a href="<?= e($item_url) ?>" target="_blank" rel="nofollow noopener noreferrer"><?= e($item['author_name']) ?></a>
                         <?php else: ?>
                             <?= e($item['author_name']) ?>
                         <?php endif; ?>

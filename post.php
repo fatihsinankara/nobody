@@ -48,14 +48,17 @@ $comment_success = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_comment'])) {
     if (!csrf_verify($_POST['csrf_token'] ?? '')) {
         $comment_error = 'Güvenlik doğrulaması (CSRF) başarısız oldu. Lütfen formu yenileyin.';
+    } elseif (!empty($_POST['website_hp'])) {
+        // Honeypot yakalandı - bot tespit edildi
+        $comment_error = 'İşlem güvenlik nedeniyle durduruldu.';
     } elseif (!check_rate_limit('comment', 5, 300)) {
         $comment_error = 'Çok sık yorum gönderiyorsunuz. Lütfen birkaç dakika sonra tekrar deneyin.';
     } else {
-        $author_name = trim($_POST['author_name'] ?? '');
-        $author_email = trim($_POST['author_email'] ?? '');
+        $author_name = mb_substr(trim($_POST['author_name'] ?? ''), 0, 80);
+        $author_email = mb_substr(trim($_POST['author_email'] ?? ''), 0, 120);
         $author_url = trim($_POST['author_url'] ?? '');
-        $comment_text = trim($_POST['content'] ?? '');
-        $captcha_input = (int)($_POST['captcha_answer'] ?? -1);
+        $comment_text = mb_substr(trim($_POST['content'] ?? ''), 0, 3000);
+        $captcha_input = $_POST['captcha_answer'] ?? '';
 
         if (empty($author_name)) {
             $comment_error = 'Lütfen adınızı veya takma adınızı belirtin.';
@@ -66,9 +69,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_comment'])) {
         } else {
             record_rate_limit_hit('comment');
 
-            if (!empty($author_url) && !preg_match('#^https?://#i', $author_url)) {
-                $author_url = 'http://' . $author_url;
+            if ($author_email !== '' && !filter_var($author_email, FILTER_VALIDATE_EMAIL)) {
+                $author_email = null;
             }
+
+            $author_url = safe_url($author_url);
 
             $ins_c = $pdo->prepare("INSERT INTO comments (post_id, author_name, author_email, author_url, content, created_at, is_approved) VALUES (?, ?, ?, ?, ?, NOW(), 1)");
             $ins_c->execute([$post['id'], $author_name, $author_email, $author_url, $comment_text]);
@@ -169,8 +174,11 @@ include __DIR__ . '/includes/header.php';
                 <div class="comment-header">
                     #<?= $idx + 1 ?> &mdash; 
                     <span class="comment-author">
-                        <?php if (!empty($com['author_url'])): ?>
-                            <a href="<?= e($com['author_url']) ?>" target="_blank" rel="nofollow noopener"><?= e($com['author_name']) ?></a>
+                        <?php 
+                        $com_url = safe_url($com['author_url'] ?? '');
+                        if (!empty($com_url)): 
+                        ?>
+                            <a href="<?= e($com_url) ?>" target="_blank" rel="nofollow noopener noreferrer"><?= e($com['author_name']) ?></a>
                         <?php else: ?>
                             <?= e($com['author_name']) ?>
                         <?php endif; ?>
@@ -191,9 +199,15 @@ include __DIR__ . '/includes/header.php';
         <form action="<?= post_url($post['slug']) ?>#comments" method="POST">
             <?= csrf_field() ?>
 
+            <!-- Anti-Spam Honeypot (Botlar için gizli tuzak alan) -->
+            <div style="display:none;" aria-hidden="true">
+                <label for="website_hp">Bu alanı boş bırakın:</label>
+                <input type="text" id="website_hp" name="website_hp" value="" tabindex="-1" autocomplete="off">
+            </div>
+
             <div class="form-group">
                 <label for="author_name">İsim veya Takma Ad: *</label>
-                <input type="text" id="author_name" name="author_name" required value="<?= isset($_POST['author_name']) ? e($_POST['author_name']) : '' ?>">
+                <input type="text" id="author_name" name="author_name" maxlength="80" required value="<?= isset($_POST['author_name']) ? e($_POST['author_name']) : '' ?>">
             </div>
 
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
