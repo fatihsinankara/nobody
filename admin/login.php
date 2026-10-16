@@ -76,17 +76,17 @@ include __DIR__ . '/../includes/header.php';
         <div class="alert alert-error"><?= e($error) ?></div>
     <?php endif; ?>
 
-    <form action="/admin/login.php" method="POST">
+    <form action="/admin/login.php" method="POST" autocomplete="off">
         <?= csrf_field() ?>
 
         <div class="form-group">
             <label for="username">Kullanıcı Adı:</label>
-            <input type="text" id="username" name="username" required autofocus value="<?= e(input('username', 50)) ?>" autocomplete="username">
+            <input type="text" id="username" name="username" required autofocus autocomplete="off">
         </div>
 
         <div class="form-group">
             <label for="password">Şifre:</label>
-            <input type="password" id="password" name="password" required autocomplete="current-password">
+            <input type="password" id="password" name="password" required autocomplete="off">
         </div>
 
         <div style="margin-top: 15px;">

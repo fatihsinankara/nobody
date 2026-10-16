@@ -65,7 +65,7 @@ Tarayıcınızda açın:
 
 ---
 
-## 🔐 Varsayılan Giriş Bilgileri
+## 🔐 Yönetici Girişi
 
 * **Kullanıcı Adı & Şifre:** Kurulum sihirbazı (`/install.php`) esnasında belirlediğiniz yönetici kimlik bilgileri geçerlidir.
 * *(Giriş yaptıktan sonra **Site Ayarları** sekmesinden şifrenizi istediğiniz zaman değiştirebilirsiniz).*
